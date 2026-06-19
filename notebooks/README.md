@@ -8,12 +8,7 @@ The core philosophy of `lcmv_stats` is **modularity**:
 2.  **Feature Extraction** (`connectivity.py`) converts epochs into connectivity matrices.
 3.  **Inference** (`statistics.py`) compares two sets of matrices, regardless of what they represent.
 
-## 📋 Table of Contents
-1. [Concept: The "Condition A vs. Condition B" Framework](#concept-the-condition-a-vs-condition-b-framework)
-2. [Scenario 1: State-Based Comparison (Rest vs. Task)](#scenario-1-state-based-comparison-rest-vs-task)
-3. [Scenario 2: Task-Based Comparison (Spiral vs. PingPong)](#scenario-2-task-based-comparison-spiral-vs-pingpong)
-4. [Complete Group-Level Workflow](#complete-group-level-workflow)
-5. [Advanced: Directionality with GPDC](#advanced-directionality-with-gpdc)
+
 
 ---
 
@@ -79,58 +74,7 @@ rest_vector = rest_conn[triu_idx]
 spiral_vector = spiral_conn[triu_idx]
 ```
 
----
 
-## Scenario 2: Task-Based Comparison (Spiral vs. PingPong)
-
-**Use Case:** Comparing two different motor tasks to see if network topology changes between movement types.
-**Data Type:** Event-locked trials.
-**Key Function:** `extract_event_epochs`
-
-### Why use this?
-Different tasks may have different event markers in your CSV. By filtering the events DataFrame, you can isolate specific trial types and extract only the relevant windows.
-
-### Implementation
-
-```python
-import pandas as pd
-import lcmv_stats as ls
-from pathlib import Path
-
-LCMV_ROOT = Path("/path/to/derivatives/lcmv")
-EVENTS_CSV = Path("/path/to/events.csv")
-SUBJECT_ID = "sub-001"
-
-# 1. Load and Filter Events
-events_df = pd.read_csv(EVENTS_CSV)
-
-# Assume your CSV has a column 'task_type' with values 'spiral' and 'pingpong'
-spiral_events = events_df[events_df['task_type'] == 'spiral']
-pingpong_events = events_df[events_df['task_type'] == 'pingpong']
-
-# 2. Extract Epochs
-# We extract the active movement window (post-event) for both tasks
-spiral_in, spiral_out = ls.extract_event_epochs(
-    SUBJECT_ID, LCMV_ROOT, spiral_events, 
-    pre_sec=1.0, post_sec=2.0 # Focus on movement execution
-)
-
-pingpong_in, pingpong_out = ls.extract_event_epochs(
-    SUBJECT_ID, LCMV_ROOT, pingpong_events, 
-    pre_sec=1.0, post_sec=2.0
-)
-
-# 3. Compute Connectivity
-sfreq = ls.get_subject_sfreq(SUBJECT_ID, LCMV_ROOT)
-
-spiral_conn, _ = ls.extract_wpli_features(spiral_in, spiral_out, band="gamma", sfreq=sfreq)
-pingpong_conn, _ = ls.extract_wpli_features(pingpong_in, pingpong_out, band="gamma", sfreq=sfreq)
-
-# 4. Prepare for Group Stats
-triu_idx = np.triu_indices(spiral_conn.shape[0], k=1)
-spiral_vector = spiral_conn[triu_idx]
-pingpong_vector = pingpong_conn[triu_idx]
-```
 
 ---
 
