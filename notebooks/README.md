@@ -20,9 +20,11 @@ The core philosophy of `lcmv_stats` is **modularity**:
 
 Your job is simply to ensure that the data in Array A and Array B corresponds to the same subjects in the same order.
 
+<br>
+
 ---
 
-## Scenario 1: State-Based Comparison (Rest vs. Task)
+## Example: State-Based Comparison (Rest vs. Task)
 
 **Use Case:** Comparing baseline resting state against an active task (e.g., "Rest" vs. "Spiral Drawing").
 **Data Type:** Continuous recordings (no discrete trials).
@@ -76,7 +78,7 @@ spiral_vector = spiral_conn[triu_idx]
 
 
 
----
+<br>
 
 ## Complete Group-Level Workflow
 
@@ -160,7 +162,7 @@ else:
     print("❌ Not enough valid subjects for statistics.")
 ```
 
----
+<br>
 
 ## Advanced: Directionality with GPDC
 
