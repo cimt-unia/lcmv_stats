@@ -4,6 +4,7 @@
 
 While `lcmv_xtra` handles LCMV source reconstruction and basic connectivity estimation, `lcmv_stats` provides the rigorous statistical framework needed for publication-ready results, specifically optimized for the **CIMT Unified Atlas** (448 ROIs).
 
+<br>
 
 ## 📦 Installation
 
@@ -19,23 +20,18 @@ pip install mne spectral_connectivity scipy pandas numpy matplotlib
 # 3. Install lcmv_stats
 pip install git+https://github.com/cimt-unia/lcmv_stats.git
 ```
+<br>
 
 ## Tutorials & Examples
 
 Get started with our step-by-step guides in the `notebooks/` folder:
 
-*   **[📘 Main Example](notebooks/Tutorial.ipynb)**: Full pipeline walkthrough (Epoching → Connectivity → Statistics).
+*   **[Example](notebooks/Tutorial.ipynb)**: Full pipeline walkthrough (Epoching → Connectivity → Statistics).
 *   
-*   **[🔬 Tutorial](notebooks/TUTORIAL_ADVANCED_ANALYSIS.md)**: Flexible comparisons (e.g., Rest vs. Task, Spiral vs. PingPong).
+*   **[Tutorial](notebooks/TUTORIAL_ADVANCED_ANALYSIS.md)**: Flexible comparisons (e.g., Rest vs. Task, Spiral vs. PingPong).
 
-## Architecture
+<br>
 
-| Feature | `lcmv_xtra` (Source & Prep) | `lcmv_stats` (Analysis & Stats) |
-| :--- | :--- | :--- |
-| **Core Function** | LCMV Beamforming, Source Extraction | Permutation Tests, GPDC, Clustering |
-| **Atlas Support** | CIMT (448), DiFuMo (512), Glasser+Tian | Optimized for CIMT Motor Network |
-| **Connectivity** | WPLI (Weighted Phase Lag Index) | WPLI + GPDC (Generalized Partial Directed Coherence) |
-| **Output** | Source Time Courses, Connectivity Matrices | Statistical DataFrames, Cluster Maps, Reports |
 
 ## Key Modules
 
@@ -45,3 +41,15 @@ Get started with our step-by-step guides in the `notebooks/` folder:
 - **`timefreq.py`**: Generates Z-scored spectrograms and runs cluster-based permutation tests for time-frequency data.
 - **`visualization.py`**: Provides tools for plotting connectivity matrices, Power Spectral Density (PSD), and top significant edges.
 - **`reporting.py`**: Automates the generation of markdown reports and saves spectral results with cluster overlays.
+
+<br>
+
+  ## Architecture
+
+| Feature | `lcmv_xtra` (Source & Prep) | `lcmv_stats` (Analysis & Stats) |
+| :--- | :--- | :--- |
+| **Core Function** | LCMV Beamforming, Source Extraction | Permutation Tests, GPDC, Clustering |
+| **Atlas Support** | CIMT (448), DiFuMo (512), Glasser+Tian | Optimized for CIMT Motor Network |
+| **Connectivity** | WPLI (Weighted Phase Lag Index) | WPLI + GPDC (Generalized Partial Directed Coherence) |
+| **Output** | Source Time Courses, Connectivity Matrices | Statistical DataFrames, Cluster Maps, Reports |
+
