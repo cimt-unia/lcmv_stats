@@ -20,9 +20,11 @@ The core philosophy of `lcmv_stats` is **modularity**:
 
 Your job is simply to ensure that the data in Array A and Array B corresponds to the same subjects in the same order.
 
+
+
 <br>
 
----
+
 
 ## Example: State-Based Comparison (Rest vs. Task)
 
