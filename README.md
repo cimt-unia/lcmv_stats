@@ -22,15 +22,6 @@ pip install git+https://github.com/cimt-unia/lcmv_xtra.git
 pip install mne spectral_connectivity scipy pandas numpy matplotlib
 ```
 
-### Step 2: Install lcmv_stats
-
-Clone this repository and install it in editable mode:
-
-```bash
-git clone <repository_url>
-cd lcmv_stats
-pip install -e .
-```
 
 ## 🏗️ Architecture
 
@@ -41,7 +32,30 @@ pip install -e .
 | **Connectivity** | WPLI (Weighted Phase Lag Index) | WPLI + GPDC (Generalized Partial Directed Coherence) |
 | **Output** | Source Time Courses, Connectivity Matrices | Statistical DataFrames, Cluster Maps, Reports |
 
-## 🚀 Quick Start
+
+
+
+## 📖 Key Modules
+
+- **`epoching.py`**: Handles event-locked trial extraction and continuous sliding-window epoching with overlap support.
+- **`connectivity.py`**: Computes WPLI via `lcmv_xtra` and implements targeted GPDC for statistically significant edges.
+- **`statistics.py`**: Performs non-parametric edge-wise permutation tests and calculates effect sizes (Cohen's d).
+- **`timefreq.py`**: Generates Z-scored spectrograms and runs cluster-based permutation tests for time-frequency data.
+- **`visualization.py`**: Provides tools for plotting connectivity matrices, Power Spectral Density (PSD), and top significant edges.
+- **`reporting.py`**: Automates the generation of markdown reports and saves spectral results with cluster overlays.
+
+
+
+## 📋 Requirements
+
+- Python >= 3.9
+- NumPy, Pandas, SciPy, Matplotlib
+- MNE-Python
+- lcmv_xtra
+- spectral_connectivity
+
+
+## Quick Start
 
 ```python
 import lcmv_stats as ls
@@ -66,22 +80,4 @@ in_conn, out_conn = ls.extract_wpli_features(in_ep, out_ep, band="low_beta", sfr
 df_sig = ls.run_edgewise_permutation(in_data, out_data, n_permutations=5000)
 ```
 
-
-
-## 📖 Key Modules
-
-- **`epoching.py`**: Handles event-locked trial extraction and continuous sliding-window epoching with overlap support.
-- **`connectivity.py`**: Computes WPLI via `lcmv_xtra` and implements targeted GPDC for statistically significant edges.
-- **`statistics.py`**: Performs non-parametric edge-wise permutation tests and calculates effect sizes (Cohen's d).
-- **`timefreq.py`**: Generates Z-scored spectrograms and runs cluster-based permutation tests for time-frequency data.
-- **`visualization.py`**: Provides tools for plotting connectivity matrices, Power Spectral Density (PSD), and top significant edges.
-- **`reporting.py`**: Automates the generation of markdown reports and saves spectral results with cluster overlays.
-
-## 📋 Requirements
-
-- Python >= 3.9
-- NumPy, Pandas, SciPy, Matplotlib
-- MNE-Python
-- lcmv_xtra
-- spectral_connectivity
 
