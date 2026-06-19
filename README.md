@@ -1,6 +1,6 @@
 # LCMV Stats Library
 
-**lcmv_stats** is a Python library designed for advanced statistical analysis of LCMV source-reconstructed EEG/MEG data. It acts as the statistical complement to **`lcmv_xtra`**, specifically optimized for the **CIMT Unified Atlas** (448 ROIs).
+This library is designed for advanced statistical analysis of LCMV source-reconstructed EEG/MEG data. It acts as the statistical complement to **`lcmv_xtra`**, specifically optimized for the **CIMT Unified Atlas** (448 ROIs).
 
 While `lcmv_xtra` handles source reconstruction, atlas extraction, and basic connectivity estimation, `lcmv_stats` provides robust tools for:
 - **Group-level Statistical Inference**: Edge-wise permutation tests and cluster-based correction.
