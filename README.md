@@ -1,29 +1,34 @@
 # LCMV Stats Library
 
-This library is designed for advanced statistical analysis of LCMV source-reconstructed EEG/MEG data. It acts as the statistical complement to **`lcmv_xtra`**, specifically optimized for the **CIMT Unified Atlas** (448 ROIs).
+**lcmv_stats** is the statistical analysis companion to **[lcmv_xtra](https://github.com/cimt-unia/lcmv_xtra)**. 
 
-While `lcmv_xtra` handles source reconstruction, atlas extraction, and basic connectivity estimation, `lcmv_stats` provides robust tools for:
-- **Group-level Statistical Inference**: Edge-wise permutation tests and cluster-based correction.
-- **Advanced Connectivity Metrics**: Generalized Partial Directed Coherence (GPDC) for significant edges.
-- **Time-Frequency Analysis**: Z-scored spectrograms and cluster-based permutation testing.
-- **Automated Reporting**: Generation of markdown reports and publication-ready visualizations.
+While `lcmv_xtra` handles LCMV source reconstruction and basic connectivity estimation, `lcmv_stats` provides the rigorous statistical framework needed for publication-ready results, specifically optimized for the **CIMT Unified Atlas** (448 ROIs).
+
 
 ## 📦 Installation
 
-### Step 1: Install Dependencies
-
-`lcmv_stats` relies on `lcmv_xtra` for atlas definitions and core connectivity functions. Since `lcmv_xtra` is hosted on GitHub, it must be installed directly from the repository.
+`lcmv_stats` requires `lcmv_xtra` as a dependency.
 
 ```bash
 # 1. Install lcmv_xtra from GitHub
 pip install git+https://github.com/cimt-unia/lcmv_xtra.git
 
-# 2. Install other scientific dependencies
+# 2. Install scientific dependencies
 pip install mne spectral_connectivity scipy pandas numpy matplotlib
+
+# 3. Install lcmv_stats
+pip install git+https://github.com/cimt-unia/lcmv_stats.git
 ```
 
+## Tutorials & Examples
 
-## 🏗️ Architecture
+Get started with our step-by-step guides in the `notebooks/` folder:
+
+*   **[📘 Main Example](notebooks/Tutorial.ipynb)**: Full pipeline walkthrough (Epoching → Connectivity → Statistics).
+*   
+*   **[🔬 Tutorial](notebooks/TUTORIAL_ADVANCED_ANALYSIS.md)**: Flexible comparisons (e.g., Rest vs. Task, Spiral vs. PingPong).
+
+## Architecture
 
 | Feature | `lcmv_xtra` (Source & Prep) | `lcmv_stats` (Analysis & Stats) |
 | :--- | :--- | :--- |
@@ -32,10 +37,7 @@ pip install mne spectral_connectivity scipy pandas numpy matplotlib
 | **Connectivity** | WPLI (Weighted Phase Lag Index) | WPLI + GPDC (Generalized Partial Directed Coherence) |
 | **Output** | Source Time Courses, Connectivity Matrices | Statistical DataFrames, Cluster Maps, Reports |
 
-
-
-
-## 📖 Key Modules
+## Key Modules
 
 - **`epoching.py`**: Handles event-locked trial extraction and continuous sliding-window epoching with overlap support.
 - **`connectivity.py`**: Computes WPLI via `lcmv_xtra` and implements targeted GPDC for statistically significant edges.
@@ -43,41 +45,3 @@ pip install mne spectral_connectivity scipy pandas numpy matplotlib
 - **`timefreq.py`**: Generates Z-scored spectrograms and runs cluster-based permutation tests for time-frequency data.
 - **`visualization.py`**: Provides tools for plotting connectivity matrices, Power Spectral Density (PSD), and top significant edges.
 - **`reporting.py`**: Automates the generation of markdown reports and saves spectral results with cluster overlays.
-
-
-
-## 📋 Requirements
-
-- Python >= 3.9
-- NumPy, Pandas, SciPy, Matplotlib
-- MNE-Python
-- lcmv_xtra
-- spectral_connectivity
-
-
-## Quick Start
-
-```python
-import lcmv_stats as ls
-from pathlib import Path
-
-# 1. Load CIMT Atlas metadata from lcmv_xtra
-labels = ls.get_cimt_labels()
-motor_indices = ls.get_motor_network_indices()
-
-# 2. Extract Epochs using lcmv_stats helpers
-in_ep, out_ep = ls.extract_event_epochs(
-    subject_id="sub-001",
-    lcmv_root=Path("/path/to/derivatives/lcmv"),
-    events_df=my_events_df
-)
-
-# 3. Compute WPLI (delegated to lcmv_xtra)
-sfreq = ls.get_subject_sfreq("sub-001", Path("/path/to/derivatives/lcmv"))
-in_conn, out_conn = ls.extract_wpli_features(in_ep, out_ep, band="low_beta", sfreq=sfreq)
-
-# 4. Run Group-Level Statistics
-df_sig = ls.run_edgewise_permutation(in_data, out_data, n_permutations=5000)
-```
-
-
