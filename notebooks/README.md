@@ -8,9 +8,9 @@ The core philosophy of `lcmv_stats` is **modularity**:
 2.  **Feature Extraction** (`connectivity.py`) converts epochs into connectivity matrices.
 3.  **Inference** (`statistics.py`) compares two sets of matrices, regardless of what they represent.
 
+<br>
 
 
----
 
 ## Concept: The "Condition A vs. Condition B" Framework
 
