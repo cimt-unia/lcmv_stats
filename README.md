@@ -26,9 +26,9 @@ pip install git+https://github.com/cimt-unia/lcmv_stats.git
 
 Get started with our step-by-step guides in the `notebooks/` folder:
 
-*   **[Example](notebooks/Tutorial.ipynb)**: Full pipeline walkthrough (Epoching → Connectivity → Statistics).
+*   **[Test_Example](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Test.ipynb)**: Full pipeline walkthrough (Epoching → Connectivity → Statistics).
 *   
-*   **[Tutorial](notebooks/TUTORIAL_ADVANCED_ANALYSIS.md)**: Flexible comparisons (e.g., Rest vs. Task, Spiral vs. PingPong).
+*   **[Tutorial](https://github.com/cimt-unia/lcmv_stats/tree/main/notebooks)**: Flexible comparisons (e.g., Rest vs. Task, Spiral vs. PingPong).
 
 <br>
 
