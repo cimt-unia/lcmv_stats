@@ -12,7 +12,7 @@ from .timefreq import compute_zscored_spectrogram, run_cluster_spectrogram
 from .visualization import plot_connectivity_matrix, validate_matrix_quality, plot_psd_rois
 from .reporting import plot_top_edges, generate_markdown_report, save_spectral_results
 from ._atlas import get_cimt_labels, get_motor_network_indices
-from .batch import prepare_group_connectivity, prepare_group_vectors
+from .batch import prepare_group_connectivity, prepare_group_comparison, prepare_group_vectors
 from . import batch
 
 __version__ = "0.1.0"
@@ -37,6 +37,7 @@ __all__ = [
     "get_cimt_labels",
     "get_motor_network_indices",
     "prepare_group_connectivity",
+    "prepare_group_comparison",
     "prepare_group_vectors",
     "batch",
 ]
