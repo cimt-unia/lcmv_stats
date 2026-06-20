@@ -54,6 +54,75 @@ def plot_top_edges(
     if save_path: plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
 
+def create_directed_effect_map(
+    df_sig: pd.DataFrame,
+    in_gpdc: np.ndarray,
+    out_gpdc: np.ndarray,
+    roi_names: List[str],
+    alpha: float = 0.05,
+    condition_label: str = "In-Phase"
+) -> pd.DataFrame:
+    """
+    Combines undirected significance (WPLI p-val) with directed flow (GPDC).
+    
+    Args:
+        df_sig: DataFrame from run_edgewise_permutation.
+        in_gpdc: GPDC matrix for condition A (n_rois x n_rois).
+        out_gpdc: GPDC matrix for condition B (n_rois x n_rois).
+        roi_names: List of ROI names corresponding to GPDC matrix rows/cols.
+        alpha: Significance threshold for filtering edges.
+        condition_label: Label for the GPDC condition being reported.
+        
+    Returns:
+        DataFrame with columns: edge, cohens_d, p_val, dominant_direction, 
+                               directional_strength, wpli_mean_diff, gpdc_condition
+    """
+    sig_edges = df_sig[df_sig['p_val'] < alpha].copy()
+    if sig_edges.empty or in_gpdc is None:
+        return pd.DataFrame()
+    
+    # Create ROI name to index mapping
+    roi_to_idx = {name: idx for idx, name in enumerate(roi_names)}
+    
+    directed_results = []
+    for _, row in sig_edges.iterrows():
+        r1, r2 = row['roi1'], row['roi2']
+        
+        # Skip if ROIs not in GPDC subset
+        if r1 not in roi_to_idx or r2 not in roi_to_idx:
+            continue
+            
+        idx1, idx2 = roi_to_idx[r1], roi_to_idx[r2]
+        
+        # Use in_gpdc as primary; fall back to out_gpdc if specified
+        gpdc_matrix = in_gpdc if condition_label == "In-Phase" else out_gpdc
+        
+        flow_1_to_2 = gpdc_matrix[idx1, idx2]
+        flow_2_to_1 = gpdc_matrix[idx2, idx1]
+        
+        # Determine dominant direction
+        if flow_1_to_2 > flow_2_to_1:
+            direction = f"{r1} → {r2}"
+            strength = flow_1_to_2 - flow_2_to_1
+        else:
+            direction = f"{r2} → {r1}"
+            strength = flow_2_to_1 - flow_1_to_2
+            
+        directed_results.append({
+            'edge': f"{r1}-{r2}",
+            'cohens_d': row['cohens_d'],
+            'p_val': row['p_val'],
+            'dominant_direction': direction,
+            'directional_strength': strength,
+            'wpli_mean_diff': row['mean_diff'],
+            'gpdc_condition': condition_label
+        })
+    
+    if not directed_results:
+        return pd.DataFrame()
+        
+    return pd.DataFrame(directed_results).sort_values('directional_strength', ascending=False)
+
 def save_spectral_results(
     output_dir: Path,
     subject_id: str,
