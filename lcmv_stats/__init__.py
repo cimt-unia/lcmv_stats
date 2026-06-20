@@ -3,7 +3,7 @@
 lcmv_stats: Statistical analysis and machine learning tools for LCMV source-reconstructed EEG/MEG data.
 Optimized for the CIMT Unified Atlas (448 ROIs) but flexible for other structures.
 """
-
+from ._atlas import get_cimt_labels, get_motor_network_indices, get_roi_index
 from .epoching import extract_event_epochs, extract_continuous_epochs
 from .utils import get_subject_sfreq, map_subject_to_subj, get_roi_time_series
 from .connectivity import extract_wpli_features, extract_gpdc_features
@@ -32,6 +32,11 @@ from . import batch
 __version__ = "0.1.0"
 
 __all__ = [
+    # Atlas
+    "get_cimt_labels",
+    "get_motor_network_indices",
+    "get_roi_index",  
+    
     # Epoching
     "extract_event_epochs",
     "extract_continuous_epochs",
