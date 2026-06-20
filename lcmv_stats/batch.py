@@ -5,6 +5,7 @@ Batch processing helpers for lcmv_stats.
 Handles subject iteration and data aggregation.
 """
 
+
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -15,6 +16,41 @@ from .epoching import extract_event_epochs
 from .connectivity import extract_wpli_features
 
 logger = logging.getLogger(__name__)
+
+def prepare_group_vectors(connectivity_vectors: list[np.ndarray]) -> np.ndarray:
+    """
+    Safely stacks a list of upper-triangle connectivity vectors 
+    into the (n_subjects, n_edges) array required by lcmv_stats statistics.
+    
+    Args:
+        connectivity_vectors: A list of 1D numpy arrays, each representing 
+                              the upper triangle of a subject's connectivity matrix.
+                              
+    Returns:
+        A 2D numpy array of shape (n_subjects, n_edges).
+    """
+    if not connectivity_vectors:
+        raise ValueError("No valid connectivity vectors provided.")
+    
+    # Validate that all vectors have the same length (same number of edges)
+    n_edges = connectivity_vectors[0].shape[0]
+    
+    # Ensure they are 1D vectors
+    if connectivity_vectors[0].ndim != 1:
+        raise ValueError("Input must be a list of 1D vectors (upper triangles), not 2D matrices.")
+
+    for i, vec in enumerate(connectivity_vectors):
+        if vec.shape[0] != n_edges:
+            raise ValueError(f"Subject {i} has {vec.shape[0]} edges, expected {n_edges}")
+        if vec.ndim != 1:
+             raise ValueError(f"Subject {i} input is not a 1D vector.")
+    
+    # Stack into the final array
+    return np.stack(connectivity_vectors)
+
+
+
+
 
 def prepare_group_connectivity(
     events_df: pd.DataFrame,
