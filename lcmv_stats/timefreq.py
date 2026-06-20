@@ -19,6 +19,62 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def extract_single_roi_epoch(
+    trial_file: Path, 
+    t_event: float, 
+    roi_idx: int, 
+    sfreq: float, 
+    pre_sec: float, 
+    post_sec: float,
+    target_sfreq: float, 
+    expected_samples: int
+) -> Optional[np.ndarray]:
+    """
+    Extract and resample a single ROI epoch from a raw trial file.
+    
+    This function bridges raw multi-ROI trial data and TF analysis by handling
+    ROI selection, temporal windowing, and cross-subject resampling automatically.
+    
+    Args:
+        trial_file: Path to the .npy trial file (shape: n_rois x n_times).
+        t_event: Event timestamp in seconds relative to trial start.
+        roi_idx: Numeric index of the target ROI in the CIMT atlas.
+        sfreq: Original sampling frequency of the trial data.
+        pre_sec: Seconds before event to include.
+        post_sec: Seconds after event to include.
+        target_sfreq: Target sampling frequency for output.
+        expected_samples: Exact number of samples expected in output.
+        
+    Returns:
+        1D numpy array of shape (expected_samples,) or None if extraction fails.
+    """
+    try:
+        trial_data = np.load(trial_file)
+    except Exception:
+        return None
+        
+    n_rois, n_times = trial_data.shape
+    if not (0 <= roi_idx < n_rois):
+        return None
+        
+    start_sample = int(np.round((t_event - pre_sec) * sfreq))
+    end_sample = int(np.round((t_event + post_sec) * sfreq))
+    
+    if start_sample < 0 or end_sample > n_times:
+        return None
+        
+    epoch = trial_data[roi_idx, start_sample:end_sample]
+    
+    # Resample to target frequency if needed
+    if sfreq != target_sfreq:
+        epoch = signal.resample(epoch, int(round(len(epoch) * target_sfreq / sfreq)))
+        
+    # Enforce exact length via truncation or edge-padding
+    if len(epoch) >= expected_samples:
+        return epoch[:expected_samples]
+    return np.pad(epoch, (0, expected_samples - len(epoch)), mode="edge")
+
+
 def compute_zscored_spectrogram(
     epoch: np.ndarray,
     sfreq: float,
@@ -71,10 +127,8 @@ def compute_zscored_spectrogram(
     
     # Determine baseline mask
     if baseline_duration is None:
-        # Use entire pre-event period
         ref_mask = t_relative < 0
     else:
-        # Use first N seconds of pre-event period
         ref_mask = (t_relative >= -pre_sec) & (t_relative <= -pre_sec + baseline_duration)
 
     if not np.any(ref_mask):
