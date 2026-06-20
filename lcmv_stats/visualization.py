@@ -1,6 +1,7 @@
 # lcmv_stats/visualization.py
 """
-Visualization tools for inspecting CIMT connectivity features and spectral properties.
+Visualization tools for inspecting CIMT connectivity features, spectral properties, 
+and machine learning feature distributions.
 """
 
 import numpy as np
@@ -8,10 +9,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from scipy import signal
+from scipy.ndimage import gaussian_filter
 import lcmv_xtra
 import logging
+from typing import Optional, List, Dict, Tuple
 
 logger = logging.getLogger(__name__)
+
+# ─── Existing Functions (Keep as is) ───
 
 def plot_connectivity_matrix(
     matrix: np.ndarray, 
@@ -180,4 +185,146 @@ def plot_psd_rois(
     fig.suptitle(f"{title}: In-phase vs Out-phase", fontsize=14)
     fig.text(0.5, 0.02, "Frequency (Hz)", ha='center', fontsize=12)
     plt.tight_layout(rect=[0.02, 0.04, 0.98, 0.95])
+    plt.show()
+
+# ─── New Machine Learning & Signal Processing Visualizations ───
+
+def plot_psd_comparison(
+    signals: Dict[str, np.ndarray],
+    fs: float,
+    freq_bands: Optional[Dict[str, Tuple[float, float]]] = None,
+    freq_max: float = 120.0,
+    title: str = "Power Spectral Density Comparison"
+):
+    """
+    Plot Welch's PSD for multiple conditions on a single semi-log plot.
+    
+    Args:
+        signals: Dictionary mapping condition names to 1D signal arrays.
+        fs: Sampling frequency.
+        freq_bands: Optional dict of bands to highlight (e.g., {'beta': (13, 30)}).
+        freq_max: Maximum frequency to display.
+        title: Plot title.
+    """
+    plt.figure(figsize=(10, 6))
+    
+    colors = ['#2E8B57', '#DC143C', '#1E90FF', '#FF8C00'] # SeaGreen, Crimson, DodgerBlue, DarkOrange
+    
+    for idx, (label, sig) in enumerate(signals.items()):
+        nperseg = int(fs * 2)
+        noverlap = nperseg // 2
+        freqs, psd = signal.welch(sig, fs, nperseg=nperseg, noverlap=noverlap, window='hann')
+        
+        # Limit frequency range
+        mask = freqs <= freq_max
+        freqs = freqs[mask]
+        psd = psd[mask]
+        
+        plt.semilogy(freqs, psd, color=colors[idx % len(colors)], lw=2, label=label)
+
+    # Highlight bands if provided
+    if freq_bands:
+        for band_name, (f_low, f_high) in freq_bands.items():
+            if f_high <= freq_max:
+                plt.axvspan(f_low, f_high, color='gray', alpha=0.1, label=f'{band_name} ({f_low}-{f_high} Hz)' if idx == 0 else "")
+
+    plt.xlim(0, freq_max)
+    plt.xlabel("Frequency (Hz)")
+    plt.ylabel("PSD (σ²/Hz)")
+    plt.title(title)
+    plt.legend(loc='best')
+    plt.grid(True, alpha=0.3, which='both')
+    plt.tight_layout()
+    plt.show()
+
+def plot_spectrogram(
+    signal_data: np.ndarray,
+    fs: float,
+    title: str = "Spectrogram",
+    freq_range: Tuple[float, float] = (12, 30),
+    smooth_sigma: Tuple[float, float] = (1.0, 2.0),
+    percentile_clip: Tuple[float, float] = (70, 99)
+):
+    """
+    Plot a smoothed time-frequency spectrogram in dB.
+    
+    Args:
+        signal_data: 1D array of time-series data.
+        fs: Sampling frequency.
+        title: Plot title.
+        freq_range: Tuple (min_freq, max_freq) to display.
+        smooth_sigma: Sigma for Gaussian smoothing of the spectrogram.
+        percentile_clip: Percentiles for color scaling (vmin, vmax).
+    """
+    nperseg = int(fs * 1.0)
+    noverlap = int(nperseg * 0.75)
+    
+    f, t, Sxx = signal.spectrogram(signal_data, fs, nperseg=nperseg, noverlap=noverlap, window='hann')
+    
+    # Smooth
+    Sxx_smooth = gaussian_filter(Sxx, sigma=smooth_sigma)
+    Sxx_db = 10 * np.log10(Sxx_smooth + 1e-12)
+    
+    # Clip colors
+    vmin = np.percentile(Sxx_db, percentile_clip[0])
+    vmax = np.percentile(Sxx_db, percentile_clip[1])
+    
+    plt.figure(figsize=(12, 6))
+    mesh = plt.pcolormesh(t, f, Sxx_db, shading='gouraud', cmap='rainbow', vmin=vmin, vmax=vmax)
+    plt.ylim(freq_range)
+    plt.ylabel('Frequency (Hz)')
+    plt.xlabel('Time (sec)')
+    plt.title(title)
+    plt.colorbar(mesh, label='Power (dB)')
+    plt.tight_layout()
+    plt.show()
+
+def plot_feature_distribution(
+    df_features: pd.DataFrame,
+    target_col: str = 'target',
+    band_cols: Optional[List[str]] = None,
+    title: str = "Feature Distribution by Condition"
+):
+    """
+    Plot boxplots of frequency band powers grouped by target condition.
+    
+    Args:
+        df_features: DataFrame containing feature columns and a target column.
+        target_col: Name of the column containing class labels (e.g., 'rest', 'move').
+        band_cols: List of column names to plot. If None, attempts to find standard bands.
+        title: Plot title.
+    """
+    if band_cols is None:
+        # Default to common bands if not specified
+        standard_bands = ['delta', 'theta', 'alpha', 'beta', 'low_gamma', 'high_gamma']
+        band_cols = [c for c in standard_bands if c in df_features.columns]
+        
+    if not band_cols:
+        raise ValueError("No valid frequency band columns found in DataFrame.")
+        
+    n_bands = len(band_cols)
+    fig, axes = plt.subplots(1, n_bands, figsize=(4 * n_bands, 5), sharey=False)
+    if n_bands == 1:
+        axes = [axes]
+        
+    targets = df_features[target_col].unique()
+    
+    for i, band in enumerate(band_cols):
+        ax = axes[i]
+        data_to_plot = [df_features[df_features[target_col] == t][band].dropna() for t in targets]
+        
+        bp = ax.boxplot(data_to_plot, labels=targets, patch_artist=True)
+        
+        # Color boxes
+        colors = ['#2E8B57', '#DC143C']
+        for j, patch in enumerate(bp['boxes']):
+            patch.set_facecolor(colors[j % len(colors)])
+            patch.set_alpha(0.7)
+            
+        ax.set_title(band.replace('_', ' ').title())
+        ax.set_ylabel("Power")
+        ax.grid(True, alpha=0.3, axis='y')
+        
+    fig.suptitle(title, fontsize=14, y=1.02)
+    plt.tight_layout()
     plt.show()
