@@ -1,4 +1,3 @@
-
 # TUTORIAL
 ### Advanced Analysis Workflows with LCMV Stats
 
@@ -30,7 +29,7 @@ Your job is simply to ensure that the data in Array A and Array B corresponds to
 ### Why use this?
 Continuous data cannot be directly compared using trial-locked statistics. We use a sliding window to break long recordings into independent "epochs" (e.g., 2-second chunks). This allows us to compute stable connectivity estimates for each state.
 
-### Implementation
+### Implementation (Single Subject)
 
 ```python
 import lcmv_stats as ls
@@ -67,17 +66,18 @@ rest_conn, _ = ls.extract_wpli_features(rest_epochs, rest_epochs, band="beta", s
 task_conn, _ = ls.extract_wpli_features(task_epochs, task_epochs, band="beta", sfreq=sfreq)
 
 # 3. Prepare for Group Stats
-# Extract upper triangle to flatten the matrix into a vector of edges
-triu_idx = np.triu_indices(rest_conn.shape[0], k=1)
-rest_vector = rest_conn[triu_idx]
-task_vector = task_conn[triu_idx]
+# Use the universal helper to vectorize the matrix
+rest_vector = ls.prepare_connectivity_for_stats([rest_conn])
+task_vector = ls.prepare_connectivity_for_stats([task_conn])
 ```
 
 <br>
 
 ## Complete Group-Level Workflow (Simplified)
 
-Instead of writing a complex loop, you can now use the `prepare_group_comparison` helper. This function automatically handles subject iteration, event filtering, epoch extraction, and connectivity calculation.
+Instead of writing a complex loop, you can now use the `prepare_group_comparison` helper. This function automatically handles subject iteration, event filtering, epoch extraction, and connectivity calculation for **any** two conditions.
+
+### Option 1: Comparing Two Conditions (e.g., Rest vs. Task)
 
 ```python
 import numpy as np
@@ -100,7 +100,8 @@ group_data = ls.prepare_group_comparison(
     band=BAND,
     condition_col='task_type', # Column in your CSV
     val_a='rest',              # Condition A name
-    val_b='task'               # Condition B name
+    val_b='task',              # Condition B name
+    is_phase_comparison=False  # Default: Compare two different sets of events
 )
 
 print(f"✅ Successfully processed {len(group_data['valid_subs'])} subjects.")
@@ -122,6 +123,27 @@ else:
     print("❌ Not enough valid subjects for statistics.")
 ```
 
+### Option 2: In-Phase vs. Out-Phase Comparison
+
+If you want to compare synchronization within the same trials (In-phase vs. Out-phase), you can use the same function with a simple flag.
+
+```python
+# --- IN-PHASE VS OUT-PHASE WORKFLOW ---
+group_data_phase = ls.prepare_group_comparison(
+    events_df=events_df,
+    lcmv_root=LCMV_ROOT,
+    band=BAND,
+    is_phase_comparison=True  # This tells the function to split trials internally
+)
+
+# Run stats on In vs Out
+df_results_phase = ls.run_edgewise_permutation(
+    group_data_phase['data_a'], # In-phase connectivity
+    group_data_phase['data_b'], # Out-phase connectivity
+    n_permutations=1000
+)
+```
+
 <br>
 
 ## Advanced: Directionality with GPDC
@@ -135,6 +157,7 @@ If you find significant differences in WPLI (undirected), you can use `extract_g
 sig_edges = df_sig[df_sig['p_val'] < 0.05]
 
 if not sig_edges.empty:
+    # You need the original epochs for this subject/condition
     in_gpdc, out_gpdc, roi_names = ls.extract_gpdc_features(
         epochs_in=in_a,
         epochs_out=out_a,
@@ -146,3 +169,8 @@ if not sig_edges.empty:
     print(f"GPDC computed for {len(roi_names)} ROIs involved in significant edges.")
     # in_gpdc shape: (n_rois, n_rois) representing directed influence
 ```
+
+## Important Limitations
+
+1.  **Continuous Data in Groups**: The `prepare_group_comparison` function is optimized for event-based data found in an `events.csv`. For large-scale group analysis of continuous data (Rest vs. Task), you may need to write a custom loop that uses `extract_continuous_epochs` and then passes the resulting list of matrices to `ls.prepare_connectivity_for_stats()`.
+2.  **Edge Matching**: When comparing Condition A vs. Condition B, ensure that the ROI indices are identical. Since `lcmv_stats` uses the fixed CIMT atlas, this is handled automatically by `compute_cimt_motor_connectivity`.
