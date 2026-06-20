@@ -9,8 +9,11 @@ Replicates the robust logic from bima_spectrogram_stats_final.
 import numpy as np
 import pandas as pd
 from scipy import signal
+from scipy.ndimage import gaussian_filter
 from typing import Optional, Tuple, List
+from pathlib import Path
 from mne.stats import permutation_cluster_test, combine_adjacency, ttest_1samp_no_p
+import matplotlib.pyplot as plt
 import logging
 
 logger = logging.getLogger(__name__)
@@ -146,13 +149,20 @@ def format_cluster_results_for_publication(
     clusters: List[Tuple],
     cluster_pv: np.ndarray,
     f: np.ndarray,
-    t: np.ndarray
+    t: np.ndarray,
+    save_path: Optional[Path] = None,
+    # --- INTEGRATED PLOTTING PARAMETERS ---
+    avg_sxx: Optional[np.ndarray] = None,
+    roi_name: str = "ROI",
+    n_units: int = 0,
+    mode_label: str = "Subject",
+    smooth_sigma: Optional[Tuple[float, float]] = (1.0, 2.0),
+    colormap_percentile: float = 2.0,
+    plot_save_path: Optional[Path] = None
 ) -> pd.DataFrame:
     """
-    Convert raw MNE cluster permutation test outputs into a publication-ready DataFrame.
-    
-    Maps cluster indices back to actual Frequency (Hz) and Time (s) values,
-    making the results directly usable for scientific tables and CSV exports.
+    Convert raw MNE cluster permutation test outputs into a publication-ready DataFrame
+    AND optionally generate the corresponding time-frequency plot with clusters overlaid.
     
     Args:
         T_obs: Observed T-statistic map (n_freqs, n_times).
@@ -160,6 +170,16 @@ def format_cluster_results_for_publication(
         cluster_pv: P-values for each cluster.
         f: Frequency bins (Hz).
         t: Time bins (s, relative to event onset).
+        save_path: Optional path to save the resulting DataFrame as a CSV file.
+        
+        # Plotting Parameters (Optional - if provided, generates figure automatically)
+        avg_sxx: Average Z-scored spectrogram (n_freqs, n_times) to plot.
+        roi_name: Name of the ROI for the plot title.
+        n_units: Number of subjects or trials averaged.
+        mode_label: Label for the mode (e.g., "Subject" or "Trial").
+        smooth_sigma: Sigma for Gaussian smoothing of the plot.
+        colormap_percentile: Percentile for color limit scaling.
+        plot_save_path: Optional path to save the generated figure. If None, displays interactively.
         
     Returns:
         DataFrame with columns: cluster_id, p_value, n_points, 
@@ -167,6 +187,7 @@ def format_cluster_results_for_publication(
                                time_min_s, time_max_s,
                                mean_t_stat, peak_t_stat
     """
+    # ─── 1. FORMAT TABLE ──────────────────────────────────────────────
     if not clusters:
         logger.info("No clusters found. Returning empty DataFrame.")
         return pd.DataFrame()
@@ -184,9 +205,9 @@ def format_cluster_results_for_publication(
         
         results.append({
             'cluster_id': c_idx,
-            'p_value': cluster_pv[c_idx],
-            'significant': cluster_pv[c_idx] < 0.05,
-            'n_points': len(freq_idx) * len(time_idx),
+            'p_value': float(cluster_pv[c_idx]),
+            'significant': bool(cluster_pv[c_idx] < 0.05),
+            'n_points': int(len(freq_idx) * len(time_idx)),
             'freq_min_hz': round(float(freq_bounds[0]), 2),
             'freq_max_hz': round(float(freq_bounds[1]), 2),
             'time_min_s': round(float(time_bounds[0]), 3),
@@ -197,4 +218,80 @@ def format_cluster_results_for_publication(
     
     df = pd.DataFrame(results).sort_values('p_value')
     logger.info(f"Formatted {len(df)} clusters for publication.")
+    
+    # Save CSV if path provided
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(save_path, index=False)
+        logger.info(f"Saved publication table to {save_path}")
+    
+    # ─── 2. GENERATE PLOT AUTOMATICALLY IF DATA PROVIDED ──────────────
+    if avg_sxx is not None:
+        _plot_tf_clusters_integrated(
+            f=f, t=t, avg_sxx=avg_sxx,
+            clusters=clusters, cluster_pv=cluster_pv,
+            roi_name=roi_name, n_units=n_units,
+            mode_label=mode_label, smooth_sigma=smooth_sigma,
+            colormap_percentile=colormap_percentile,
+            save_path=plot_save_path
+        )
+    
     return df
+
+
+def _plot_tf_clusters_integrated(
+    f: np.ndarray,
+    t: np.ndarray,
+    avg_sxx: np.ndarray,
+    clusters: List,
+    cluster_pv: np.ndarray,
+    roi_name: str,
+    n_units: int,
+    mode_label: str,
+    smooth_sigma: Optional[Tuple[float, float]],
+    colormap_percentile: float,
+    save_path: Optional[Path]
+):
+    """Internal helper to generate the TF plot when called from format_cluster_results_for_publication."""
+    
+    def _get_clim(data: np.ndarray, percentile: float = 2.0) -> Tuple[float, float]:
+        lo = np.percentile(data, percentile)
+        hi = np.percentile(data, 100.0 - percentile)
+        v = max(abs(lo), abs(hi))
+        return -v, v
+    
+    # Smooth for visualization only
+    avg_sxx_plot = gaussian_filter(avg_sxx, sigma=smooth_sigma) if smooth_sigma else avg_sxx
+    vmin, vmax = _get_clim(avg_sxx_plot, colormap_percentile)
+    
+    fig, ax = plt.subplots(figsize=(14, 8))
+    
+    # Plot Mean
+    mesh = ax.pcolormesh(t, f, avg_sxx_plot,
+                         shading="gouraud", cmap="RdBu_r",
+                         vmin=vmin, vmax=vmax)
+    
+    # Overlay Significant Clusters
+    if clusters:
+        sig_mask = np.zeros_like(avg_sxx, dtype=bool)
+        for c_idx, cluster in enumerate(clusters):
+            if cluster_pv[c_idx] < 0.05:
+                sig_mask[cluster] = True
+        ax.contour(t, f, sig_mask.astype(int), levels=[0.5], colors='white', linewidths=1.5)
+        
+    ax.set_ylabel("Frequency (Hz)", fontsize=13)
+    ax.set_xlabel("Time relative to event (s)", fontsize=13)
+    ax.set_title(f"Global Average ({mode_label}) + Significant Clusters (p<0.05)\nROI: {roi_name} | N={n_units}", fontsize=14)
+    ax.axvline(x=0, color="black", linestyle="--", linewidth=2, label="Event onset")
+    ax.legend(loc="upper right")
+    fig.colorbar(mesh, ax=ax, label="Mean Z-score")
+    fig.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        logger.info(f"Saved TF plot to {save_path}")
+    else:
+        plt.show()
+    
+    plt.close()
