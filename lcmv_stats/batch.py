@@ -122,8 +122,6 @@ def prepare_group_comparison(
                 conn_a, _ = extract_wpli_features(in_a, out_a, band, sfreq)
                 # For phase, we usually compare the 'in' matrix of A vs 'out' matrix of A
                 # But to keep the signature consistent (A vs B), we treat 'in' as A and 'out' as B
-                conn_b = _ # This is actually the out_conn from the line above
-                # Let's re-calculate to be explicit for the generic structure:
                 _, conn_b = extract_wpli_features(in_a, out_a, band, sfreq)
             else:
                 # Compare Condition A vs Condition B
