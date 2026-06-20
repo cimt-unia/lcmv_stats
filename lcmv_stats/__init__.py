@@ -1,6 +1,6 @@
 # lcmv_stats/__init__.py
 """
-lcmv_stats: Statistical analysis tools for LCMV source-reconstructed EEG/MEG data.
+lcmv_stats: Statistical analysis and machine learning tools for LCMV source-reconstructed EEG/MEG data.
 Optimized for the CIMT Unified Atlas (448 ROIs) but flexible for other structures.
 """
 
@@ -9,40 +9,68 @@ from .utils import get_subject_sfreq, map_subject_to_subj
 from .connectivity import extract_wpli_features, extract_gpdc_features
 from .statistics import run_edgewise_permutation, cohens_d_paired
 from .timefreq import compute_zscored_spectrogram, run_cluster_spectrogram, format_cluster_results_for_publication, extract_single_roi_epoch, run_roi_spectrogram_analysis
-from .visualization import plot_connectivity_matrix, validate_matrix_quality, plot_psd_rois
+from .visualization import plot_connectivity_matrix, validate_matrix_quality, plot_psd_rois, plot_psd_comparison, plot_spectrogram, plot_feature_distribution
 from .reporting import plot_top_edges, generate_markdown_report, save_spectral_results, create_directed_effect_map
+from .machine_learning import (
+    get_frequency_bands, 
+    zscore_normalization, 
+    create_epochs, 
+    compute_epoch_features, 
+    process_signal_to_ml_dataframe
+)
 
 from ._atlas import get_cimt_labels, get_motor_network_indices
 from .batch import prepare_group_comparison, prepare_connectivity_for_stats
 from . import batch
 
-
-
-
-
 __version__ = "0.1.0"
 
 __all__ = [
+    # Epoching
     "extract_event_epochs",
     "extract_continuous_epochs",
+    
+    # Utils
     "get_subject_sfreq",
     "map_subject_to_subj",
+    
+    # Connectivity
     "extract_wpli_features",
     "extract_gpdc_features",
+    
+    # Statistics
     "run_edgewise_permutation",
     "cohens_d_paired",
+    
+    # Time-Frequency
     "extract_single_roi_epoch",
     "run_roi_spectrogram_analysis",
     "compute_zscored_spectrogram",
     "run_cluster_spectrogram",
     "format_cluster_results_for_publication",
+    
+    # Visualization
     "plot_connectivity_matrix",
     "validate_matrix_quality",
     "plot_psd_rois",
+    "plot_psd_comparison",
+    "plot_spectrogram",
+    "plot_feature_distribution",
+    
+    # Reporting
     "plot_top_edges",
     "generate_markdown_report",
     "save_spectral_results",
     "create_directed_effect_map",
+    
+    # Machine Learning / Feature Engineering
+    "get_frequency_bands",
+    "zscore_normalization",
+    "create_epochs",
+    "compute_epoch_features",
+    "process_signal_to_ml_dataframe",
+    
+    # Atlas & Batch
     "get_cimt_labels",
     "get_motor_network_indices",
     "prepare_group_comparison",
