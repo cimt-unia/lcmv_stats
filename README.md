@@ -27,7 +27,9 @@ pip install git+https://github.com/cimt-unia/lcmv_stats.git
 Get started with our step-by-step guides in the `notebooks/` folder:
 
 *   **[Test](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Test.ipynb)**: Testing Real-Data Verification for lcmv_stats. 
-*   **[Tutorial](https://github.com/cimt-unia/lcmv_stats/tree/main/notebooks)**: Flexible comparisons (e.g., Rest vs. Task).
+*   **[Connectivity T-test Analysis](https://github.com/cimt-unia/lcmv_stats/tree/main/notebooks)**: Cimt Motor Connectivity Analysis (e.g., Rest vs. Task).
+*   **[Spectrogram Permutation Test](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Spectrogram_Analysis.ipynb)**: Spectrogram Visualization and Stats.
+*   **[Feature Engineering for ML](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Feature_Engineering.ipynb)**: Machine Learning in the Frequency Domain 
 
 <br>
 
