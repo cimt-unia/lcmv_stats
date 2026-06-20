@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import List, Optional
 from scipy.ndimage import gaussian_filter
+import logging  # After existing imports
+
+logger = logging.getLogger(__name__)  # After COLOR constants
 
 COLOR_INPHASE = '#2E8B57'
 COLOR_OUTPHASE = '#DC143C'
@@ -54,6 +57,7 @@ def plot_top_edges(
     if save_path: plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
 
+
 def create_directed_effect_map(
     df_sig: pd.DataFrame,
     in_gpdc: np.ndarray,
@@ -90,6 +94,7 @@ def create_directed_effect_map(
         
         # Skip if ROIs not in GPDC subset
         if r1 not in roi_to_idx or r2 not in roi_to_idx:
+            logger.debug(f"Skipping edge {r1}-{r2}: ROI not in GPDC subset")
             continue
             
         idx1, idx2 = roi_to_idx[r1], roi_to_idx[r2]
