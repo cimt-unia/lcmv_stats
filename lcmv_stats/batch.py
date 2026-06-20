@@ -17,6 +17,80 @@ from .connectivity import extract_wpli_features
 
 logger = logging.getLogger(__name__)
 
+
+
+def prepare_group_comparison(
+    events_df: pd.DataFrame,
+    lcmv_root: Path,
+    band: str = "low_beta",
+    condition_col: str = 'task_type',
+    val_a: str = 'rest',
+    val_b: str = 'task'
+) -> Dict[str, any]:
+    """
+    Generic group-level processor for comparing any two conditions.
+    
+    Args:
+        events_df: DataFrame containing trial metadata.
+        lcmv_root: Path to LCMV derivatives.
+        band: Frequency band for connectivity.
+        condition_col: Column name in CSV to filter conditions.
+        val_a: Value for Condition A (e.g., 'rest').
+        val_b: Value for Condition B (e.g., 'task').
+        
+    Returns:
+        Dictionary with 'data_a', 'data_b', 'valid_subs'.
+    """
+    subject_ids = sorted([map_subject_to_subj(s) for s in events_df['subject'].unique()])
+    
+    all_vec_a = []
+    all_vec_b = []
+    valid_subs = []
+    
+    logger.info(f"Processing {len(subject_ids)} subjects for '{val_a}' vs '{val_b}'...")
+
+    for sid in subject_ids:
+        try:
+            # 1. Filter Events
+            subj_events = events_df[events_df['subject'].apply(lambda x: map_subject_to_subj(x) == sid)]
+            ev_a = subj_events[subj_events[condition_col] == val_a]
+            ev_b = subj_events[subj_events[condition_col] == val_b]
+            
+            if ev_a.empty or ev_b.empty: continue
+            
+            # 2. Extract Epochs
+            in_a, out_a = extract_event_epochs(sid, lcmv_root, ev_a)
+            in_b, out_b = extract_event_epochs(sid, lcmv_root, ev_b)
+            
+            if in_a.size == 0 or in_b.size == 0: continue
+            
+            # 3. Compute Connectivity
+            sfreq = get_subject_sfreq(sid, lcmv_root)
+            conn_a, _ = extract_wpli_features(in_a, out_a, band, sfreq)
+            conn_b, _ = extract_wpli_features(in_b, out_b, band, sfreq)
+            
+            if conn_a is None or conn_b is None: continue
+            
+            # 4. Vectorize
+            triu_idx = np.triu_indices(conn_a.shape[0], k=1)
+            all_vec_a.append(conn_a[triu_idx])
+            all_vec_b.append(conn_b[triu_idx])
+            valid_subs.append(sid)
+            
+        except Exception as e:
+            logger.warning(f"Failed for {sid}: {e}")
+            continue
+
+    if not all_vec_a:
+        raise ValueError("No valid data extracted for either condition.")
+
+    return {
+        'data_a': np.stack(all_vec_a),
+        'data_b': np.stack(all_vec_b),
+        'valid_subs': valid_subs
+    }
+
+
 def prepare_group_vectors(connectivity_vectors: list[np.ndarray]) -> np.ndarray:
     """
     Safely stacks a list of upper-triangle connectivity vectors 
