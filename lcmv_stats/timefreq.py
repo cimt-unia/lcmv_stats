@@ -349,3 +349,151 @@ def _plot_tf_clusters_integrated(
         plt.show()
     
     plt.close()
+
+# lcmv_stats/timefreq.py
+
+def run_roi_spectrogram_analysis(
+    events_df: pd.DataFrame,
+    lcmv_root: Path,
+    roi_name: str,
+    condition: str = "bima_off",
+    pre_sec: float = 5.0,
+    post_sec: float = 5.0,
+    target_sfreq: float = 250.0,
+    f_min: float = 13.0,
+    f_max: float = 30.0,
+    baseline_duration: Optional[float] = 2.0,
+    n_permutations: int = 1000,
+    threshold: dict = {'start': 0.5, 'step': 0.1},
+    smooth_sigma: Tuple[float, float] = (1.0, 2.0),
+    colormap_percentile: float = 2.0,
+    save_path_csv: Optional[Path] = None,
+    save_path_plot: Optional[Path] = None,
+    notes_filter: List[str] = ["good"]
+) -> pd.DataFrame:
+    """
+    Complete end-to-end TF cluster analysis for a single ROI.
+    
+    Orchestrates trial loading, epoch extraction, resampling, spectrogram 
+    computation, Z-scoring, cluster permutation testing, and publication output.
+    
+    Args:
+        events_df: DataFrame with 'subject', 'trial', 'event', 'notes' columns.
+        lcmv_root: Root path to LCMV derivatives.
+        roi_name: CIMT ROI name (e.g., 'STN-lh').
+        condition: Condition folder name (default: 'bima_off').
+        pre_sec/post_sec: Epoch window in seconds relative to event.
+        target_sfreq: Target sampling frequency for resampling.
+        f_min/f_max: Frequency range of interest.
+        baseline_duration: Baseline duration for Z-scoring (None = full pre-event).
+        n_permutations: Number of permutations for cluster test.
+        threshold: TFCE threshold parameters.
+        smooth_sigma: Gaussian smoothing sigma for visualization.
+        colormap_percentile: Percentile for color limit scaling.
+        save_path_csv: Path to save publication CSV table.
+        save_path_plot: Path to save TF cluster plot.
+        notes_filter: Values in 'notes' column to include.
+        
+    Returns:
+        Publication-ready DataFrame with cluster results.
+    """
+    import json
+    import re
+    from ._atlas import get_roi_index
+    
+    # ─── 1. VALIDATE & PREPARE ────────────────────────────────────────
+    roi_idx = get_roi_index(roi_name)
+    logger.info(f"ROI: {roi_name} (index {roi_idx})")
+    
+    events_df = events_df[events_df["notes"].isin(notes_filter)].copy()
+    if events_df.empty:
+        raise ValueError("No valid events after filtering.")
+    
+    total_samples = int((pre_sec + post_sec) * target_sfreq)
+    units_for_stats = []
+    global_f = global_t = None
+    
+    # ─── 2. PER-SUBJECT PROCESSING ────────────────────────────────────
+    for subject_name in sorted(events_df["subject"].unique()):
+        # Map subject ID
+        num_match = re.findall(r'\d+', subject_name)
+        subj_id = f"sub-{int(num_match[0]):03d}" if num_match else subject_name
+        
+        # Load metadata for original sfreq
+        meta_file = lcmv_root / f"{subj_id}_{condition}" / "pipeline_metadata.json"
+        if not meta_file.exists():
+            logger.warning(f"Skip {subj_id}: metadata not found")
+            continue
+            
+        with open(meta_file, 'r') as f:
+            orig_sfreq = float(json.load(f)['sfreq_hz'])
+        
+        # Get trials for this subject
+        subj_events = events_df[events_df["subject"] == subject_name]
+        trial_dir = lcmv_root / f"{subj_id}_{condition}" / "cimt_trials"
+        if not trial_dir.exists():
+            logger.warning(f"Skip {subj_id}: trial dir not found")
+            continue
+        
+        # Extract epochs using library function
+        all_epochs = []
+        for _, row in subj_events.iterrows():
+            t_event = float(row['event'])
+            if not np.isfinite(t_event): continue
+            
+            trial_file = trial_dir / f"trial_{int(row['trial']):03d}.npy"
+            if not trial_file.exists(): continue
+            
+            epoch = extract_single_roi_epoch(
+                trial_file=trial_file, t_event=t_event, roi_idx=roi_idx,
+                sfreq=orig_sfreq, pre_sec=pre_sec, post_sec=post_sec,
+                target_sfreq=target_sfreq, expected_samples=total_samples
+            )
+            if epoch is not None:
+                all_epochs.append(epoch)
+        
+        if not all_epochs: continue
+        
+        # Average trials per subject BEFORE spectrogram (preserves phase coherence)
+        avg_epoch = np.mean(all_epochs, axis=0)
+        
+        # Compute spectrogram using library function
+        f, t, Sxx_z = compute_zscored_spectrogram(
+            epoch=avg_epoch, sfreq=target_sfreq,
+            f_min=f_min, f_max=f_max,
+            pre_sec=pre_sec, baseline_duration=baseline_duration
+        )
+        
+        if global_f is None:
+            global_f, global_t = f, t
+        units_for_stats.append(Sxx_z)
+        logger.info(f"Processed {subj_id}: {len(all_epochs)} trials")
+    
+    if len(units_for_stats) < 2:
+        raise ValueError(f"Need ≥2 units for cluster test, got {len(units_for_stats)}")
+    
+    # ─── 3. CLUSTER PERMUTATION TEST ──────────────────────────────────
+    X = np.stack(units_for_stats, axis=0)
+    T_obs, clusters, cluster_pv, H0 = run_cluster_spectrogram(
+        spectrograms_3d=X,
+        n_permutations=n_permutations,
+        threshold=threshold
+    )
+    
+    sig_count = sum(1 for p in cluster_pv if p < 0.05)
+    logger.info(f"Found {sig_count} significant clusters (p<0.05)")
+    
+    # ─── 4. FORMAT & PLOT ─────────────────────────────────────────────
+    avg_sxx = np.mean(X, axis=0)
+    
+    df = format_cluster_results_for_publication(
+        T_obs=T_obs, clusters=clusters, cluster_pv=cluster_pv,
+        f=global_f, t=global_t,
+        save_path=save_path_csv,
+        avg_sxx=avg_sxx, roi_name=roi_name,
+        n_units=len(units_for_stats), mode_label="Subject",
+        smooth_sigma=smooth_sigma, colormap_percentile=colormap_percentile,
+        plot_save_path=save_path_plot
+    )
+    
+    return df
