@@ -161,8 +161,4 @@ Detailed Jupyter notebooks are available in the `notebooks/` directory:
 
 This project is licensed under the MIT License
 
-## 🙏 Acknowledgements
 
-*   **[lcmv_xtra](https://github.com/cimt-unia/lcmv_xtra)**: For source reconstruction and CIMT atlas definitions.
-*   **[MNE-Python](https://mne.tools/)**: For cluster-based permutation testing infrastructure.
-*   **[spectral_connectivity](https://github.com/edenlabllc/spectral_connectivity)**: For GPDC implementation.
