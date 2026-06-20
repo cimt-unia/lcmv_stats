@@ -10,6 +10,8 @@ While `lcmv_xtra` handles source reconstruction and basic connectivity estimatio
 *   Directed connectivity analysis (GPDC) for significant networks.
 *   Automated feature extraction for machine learning pipelines.
 
+<br>
+
 ## 📦 Installation
 
 `lcmv_stats` relies on `lcmv_xtra` for atlas definitions and core connectivity computations.
@@ -24,8 +26,11 @@ pip install mne spectral_connectivity scipy pandas numpy matplotlib
 # 3. Install lcmv_stats
 pip install git+https://github.com/cimt-unia/lcmv_stats.git
 ```
+<br>
 
 ## Quick Start
+
+<br>
 
 ### 1. Group-Level Connectivity Analysis
 Compare two conditions (e.g., Rest vs. Task) using edge-wise permutation tests on the CIMT Motor Network.
@@ -63,6 +68,8 @@ stats_df = run_edgewise_permutation(
 plot_top_edges(stats_df, band="low_beta", n_top=5)
 ```
 
+<br>
+
 ### 2. Time-Frequency Cluster Analysis
 Perform cluster-based permutation testing on spectrograms for a specific ROI.
 
@@ -85,6 +92,8 @@ df_clusters = run_roi_spectrogram_analysis(
 print(df_clusters[df_clusters['significant'] == True])
 ```
 
+<br>
+
 ### 3. Machine Learning Feature Engineering
 Extract spectral features from continuous signals for classification tasks.
 
@@ -104,6 +113,8 @@ df_ml = process_signal_to_ml_dataframe(
 print(df_ml.head())
 ```
 
+<br>
+
 ## Key Modules
 
 | Module | Description |
@@ -118,6 +129,8 @@ print(df_ml.head())
 | **`reporting.py`** | Generates publication-ready markdown reports and saves spectral results with cluster overlays. |
 | **`machine_learning.py`** | Utilities for Z-scoring, epoching, and Welch-based spectral feature extraction into DataFrames. |
 
+<br>
+
 ## Architecture & Workflow
 
 The library is designed to work seamlessly with the output structure of `lcmv_xtra`.
@@ -131,6 +144,8 @@ The library is designed to work seamlessly with the output structure of `lcmv_xt
 4.  **Statistical Inference**: `statistics.py` and `timefreq.py` apply non-parametric permutation tests to control for multiple comparisons.
 5.  **Reporting**: `reporting.py` and `visualization.py` generate figures and tables for publication.
 
+<br>
+
 ## 📖 Tutorials & Examples
 
 Detailed Jupyter notebooks are available in the `notebooks/` directory:
@@ -139,6 +154,8 @@ Detailed Jupyter notebooks are available in the `notebooks/` directory:
 *   **[Connectivity T-test Analysis](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Connectivity_Analysis.md)**: Comparing Rest vs. Task connectivity in the Motor Network.
 *   **[Spectrogram Permutation Test](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Spectrogram_Analysis.ipynb)**: Identifying significant time-frequency clusters.
 *   **[Feature Engineering for ML](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Feature_Engineering.ipynb)**: Preparing spectral features for classifiers.
+
+<br>
 
 ## 📄 License
 
