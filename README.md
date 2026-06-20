@@ -26,8 +26,7 @@ pip install git+https://github.com/cimt-unia/lcmv_stats.git
 
 Get started with our step-by-step guides in the `notebooks/` folder:
 
-*   **[Test](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Test.ipynb)**: Testing Real-Data Verification for lcmv_stats.
-*   
+*   **[Test](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Test.ipynb)**: Testing Real-Data Verification for lcmv_stats. 
 *   **[Tutorial](https://github.com/cimt-unia/lcmv_stats/tree/main/notebooks)**: Flexible comparisons (e.g., Rest vs. Task).
 
 <br>
