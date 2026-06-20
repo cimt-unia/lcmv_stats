@@ -5,7 +5,6 @@ Batch processing helpers for lcmv_stats.
 Handles subject iteration and data aggregation.
 """
 
-
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -16,8 +15,6 @@ from .epoching import extract_event_epochs
 from .connectivity import extract_wpli_features
 
 logger = logging.getLogger(__name__)
-
-
 
 def prepare_group_comparison(
     events_df: pd.DataFrame,
@@ -41,6 +38,7 @@ def prepare_group_comparison(
     Returns:
         Dictionary with 'data_a', 'data_b', 'valid_subs'.
     """
+    # Ensure subject IDs are standardized
     subject_ids = sorted([map_subject_to_subj(s) for s in events_df['subject'].unique()])
     
     all_vec_a = []
@@ -51,38 +49,47 @@ def prepare_group_comparison(
 
     for sid in subject_ids:
         try:
-            # 1. Filter Events
+            # 1. Filter Events for this specific subject
+            # We use apply here to handle mixed formats in the 'subject' column
             subj_events = events_df[events_df['subject'].apply(lambda x: map_subject_to_subj(x) == sid)]
+            
             ev_a = subj_events[subj_events[condition_col] == val_a]
             ev_b = subj_events[subj_events[condition_col] == val_b]
             
-            if ev_a.empty or ev_b.empty: continue
+            # Skip if either condition is missing for this subject
+            if ev_a.empty or ev_b.empty: 
+                logger.debug(f"Skipping {sid}: Missing events for '{val_a}' or '{val_b}'.")
+                continue
             
             # 2. Extract Epochs
             in_a, out_a = extract_event_epochs(sid, lcmv_root, ev_a)
             in_b, out_b = extract_event_epochs(sid, lcmv_root, ev_b)
             
-            if in_a.size == 0 or in_b.size == 0: continue
+            if in_a.size == 0 or in_b.size == 0: 
+                continue
             
             # 3. Compute Connectivity
-            sfreq = get_subject_sfreq(sid, lcmv_root)
+            # We default to 'bima_off' for sfreq if not specified, as it's the standard pipeline output
+            sfreq = get_subject_sfreq(sid, lcmv_root, condition="bima_off")
+            
             conn_a, _ = extract_wpli_features(in_a, out_a, band, sfreq)
             conn_b, _ = extract_wpli_features(in_b, out_b, band, sfreq)
             
-            if conn_a is None or conn_b is None: continue
+            if conn_a is None or conn_b is None: 
+                continue
             
-            # 4. Vectorize
+            # 4. Vectorize (Upper Triangle)
             triu_idx = np.triu_indices(conn_a.shape[0], k=1)
             all_vec_a.append(conn_a[triu_idx])
             all_vec_b.append(conn_b[triu_idx])
             valid_subs.append(sid)
             
         except Exception as e:
-            logger.warning(f"Failed for {sid}: {e}")
+            logger.warning(f"Failed to process subject {sid}: {e}")
             continue
 
     if not all_vec_a:
-        raise ValueError("No valid data extracted for either condition.")
+        raise ValueError("No valid data extracted for either condition. Check your event labels and paths.")
 
     return {
         'data_a': np.stack(all_vec_a),
@@ -95,21 +102,12 @@ def prepare_group_vectors(connectivity_vectors: list[np.ndarray]) -> np.ndarray:
     """
     Safely stacks a list of upper-triangle connectivity vectors 
     into the (n_subjects, n_edges) array required by lcmv_stats statistics.
-    
-    Args:
-        connectivity_vectors: A list of 1D numpy arrays, each representing 
-                              the upper triangle of a subject's connectivity matrix.
-                              
-    Returns:
-        A 2D numpy array of shape (n_subjects, n_edges).
     """
     if not connectivity_vectors:
         raise ValueError("No valid connectivity vectors provided.")
     
-    # Validate that all vectors have the same length (same number of edges)
     n_edges = connectivity_vectors[0].shape[0]
     
-    # Ensure they are 1D vectors
     if connectivity_vectors[0].ndim != 1:
         raise ValueError("Input must be a list of 1D vectors (upper triangles), not 2D matrices.")
 
@@ -119,11 +117,7 @@ def prepare_group_vectors(connectivity_vectors: list[np.ndarray]) -> np.ndarray:
         if vec.ndim != 1:
              raise ValueError(f"Subject {i} input is not a 1D vector.")
     
-    # Stack into the final array
     return np.stack(connectivity_vectors)
-
-
-
 
 
 def prepare_group_connectivity(
@@ -134,17 +128,8 @@ def prepare_group_connectivity(
     valid_condition: str = "good"
 ) -> Dict[str, any]:
     """
-    Extracts epochs and computes WPLI for all valid subjects in a group.
-    
-    Args:
-        events_df: DataFrame with 'subject' column.
-        lcmv_root: Path to LCMV derivatives.
-        band: Frequency band for WPLI.
-        
-    Returns:
-        Dictionary with 'in_data', 'out_data', 'valid_subs', and 'sfreqs'.
+    Legacy helper for In/Out phase comparisons.
     """
-    # Filter events
     if condition_col in events_df.columns:
         events_df = events_df[events_df[condition_col] == valid_condition]
         
@@ -160,17 +145,13 @@ def prepare_group_connectivity(
     
     for sid in subject_ids:
         try:
-            # Get subject-specific events
             s_events = events_df[events_df['subject'].apply(lambda x: map_subject_to_subj(x) == sid)]
-            
-            # Extract epochs
             i_ep, o_ep = extract_event_epochs(sid, lcmv_root, s_events)
             
             if i_ep.size > 0:
-                sf = get_subject_sfreq(sid, lcmv_root)
+                sf = get_subject_sfreq(sid, lcmv_root, condition="bima_off")
                 sfreqs[sid] = sf
                 
-                # Compute WPLI
                 ic, oc = extract_wpli_features(i_ep, o_ep, band, sf)
                 
                 if ic is not None:
