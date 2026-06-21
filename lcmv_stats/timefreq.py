@@ -2,19 +2,17 @@
 
 """
 Time-frequency analysis tools for CIMT source-space data.
-Handles spectrogram computation, Z-scoring, and cluster-based permutation testing.
-Designed for modularity: decouples data loading from statistical inference.
 """
 
 import numpy as np
 import scipy.signal as signal
 from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
-import logging
+import logging # Keep this import
 from mne.stats import permutation_cluster_test, combine_adjacency, ttest_1samp_no_p
 from typing import List, Optional, Tuple, Union
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+
 logger = logging.getLogger(__name__)
 
 
