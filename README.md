@@ -68,33 +68,11 @@ stats_df = run_edgewise_permutation(
 plot_top_edges(stats_df, band="low_beta", n_top=5)
 ```
 
-<br>
 
-### 2. Time-Frequency Cluster Analysis
-Perform cluster-based permutation testing on spectrograms for a specific ROI.
-
-```python
-from lcmv_stats.timefreq import run_roi_spectrogram_analysis
-
-# Run end-to-end TF analysis for the Left STN
-df_clusters = run_roi_spectrogram_analysis(
-    events_df=events_df,
-    lcmv_root=lcmv_root,
-    roi_name="STN-lh",
-    condition="bima_off",
-    f_min=13.0,       # Low Beta
-    f_max=30.0,
-    baseline_duration=2.0,
-    save_path_csv="results/stn_lh_clusters.csv",
-    save_path_plot="results/stn_lh_tf_plot.png"
-)
-
-print(df_clusters[df_clusters['significant'] == True])
-```
 
 <br>
 
-### 3. Machine Learning Feature Engineering
+### 2. Machine Learning Feature Engineering
 Extract spectral features from continuous signals for classification tasks.
 
 ```python
@@ -152,7 +130,6 @@ Detailed Jupyter notebooks are available in the `notebooks/` directory:
 
 *   **[Test Real-Data Verification](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Test.ipynb)**: Validation of statistical outputs against known data.
 *   **[Connectivity T-test Analysis](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Connectivity_Analysis.md)**: Comparing Rest vs. Task connectivity in the Motor Network.
-*   **[Spectrogram Permutation Test](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Spectrogram_Analysis.ipynb)**: Identifying significant time-frequency clusters.
 *   **[Feature Engineering for ML](https://github.com/cimt-unia/lcmv_stats/blob/main/notebooks/Feature_Engineering.ipynb)**: Preparing spectral features for classifiers.
 
 <br>
