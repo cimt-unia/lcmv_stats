@@ -2,21 +2,20 @@
 
 """
 Time-frequency analysis tools for CIMT source-space data.
+Handles spectrogram computation, Z-scoring, and cluster-based permutation testing.
+Designed for modularity: decouples data loading from statistical inference.
 """
 
 import numpy as np
 import scipy.signal as signal
 from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
-import logging # Keep this import
+import logging
 from mne.stats import permutation_cluster_test, combine_adjacency, ttest_1samp_no_p
 from typing import List, Optional, Tuple, Union
 
-
 logger = logging.getLogger(__name__)
 
-
-# SPECTROGRAM ANALYSIS FUNCTIONS 
 
 def prepare_roi_signal_from_2d(
     move_epochs_2d: np.ndarray, 
@@ -25,10 +24,6 @@ def prepare_roi_signal_from_2d(
 ) -> Tuple[np.ndarray, float]:
     """
     Averages 2D ROI epochs and calculates the exact epoch duration.
-    
-    NOTE: This function expects 2D arrays where axis 0 is 'trials/epochs' and 
-    axis 1 is 'time samples'. It averages across trials to create a single 
-    representative time series per condition.
     
     Args:
         move_epochs_2d: Shape (n_move_trials, n_samples)
@@ -41,34 +36,37 @@ def prepare_roi_signal_from_2d(
     if move_epochs_2d.ndim != 2 or rest_epochs_2d.ndim != 2:
         raise ValueError("Inputs must be 2D arrays (n_trials, n_samples).")
     
-    # Calculate duration directly from the number of samples in one epoch
     n_samples_per_epoch = move_epochs_2d.shape[1]
     epoch_dur_sec = n_samples_per_epoch / sfreq
     
-    # Average across the trial dimension (axis=0) to get a single representative signal
     move_avg = move_epochs_2d.mean(axis=0)
     rest_avg = rest_epochs_2d.mean(axis=0)
     
-    # Concatenate: Move first, then Rest
     concat_sig = np.concatenate([move_avg, rest_avg])
     
     return concat_sig, epoch_dur_sec
+
 
 def compute_zscored_spectrogram(
     sig: np.ndarray, 
     sfreq: float, 
     f_min: float = 12.0, 
     f_max: float = 30.0,
-    baseline_fraction: float = 0.8
+    baseline_fraction: float = 0.8,
+    nperseg_override: Optional[int] = None
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute a Z-scored spectrogram for a 1D signal.
     
-    The baseline is defined as the first 'baseline_fraction' of the total 
-    signal duration. This allows for consistent normalization whether the 
-    input is a single subject's average or a group average.
+    Args:
+        nperseg_override: If provided, overrides automatic nperseg calculation.
+                          Use int(sfreq * 0.5) for concatenated signals to avoid edge clipping.
     """
-    nperseg = int(sfreq * 1.0)
+    if nperseg_override is not None:
+        nperseg = nperseg_override
+    else:
+        nperseg = int(sfreq * 1.0)
+    
     nperseg = max(4, min(nperseg, len(sig) // 2))
     noverlap = int(nperseg * 0.75)
 
@@ -92,13 +90,13 @@ def compute_zscored_spectrogram(
     ref_mean = Sxx_filt[:, ref_mask].mean(axis=1, keepdims=True)
     ref_std = Sxx_filt[:, ref_mask].std(axis=1, keepdims=True)
     
-    # Prevent division by zero in low-power regions
     floor = np.where(np.abs(ref_mean) < 1e-30, 1e-30, np.abs(ref_mean) * 0.01)
     ref_std = np.where(ref_std < floor, floor, ref_std)
     
     Sxx_z = (Sxx_filt - ref_mean) / ref_std
     
     return f_filt, t, Sxx_z
+
 
 def plot_and_test_group_spectrograms(
     spectrograms_list: List[np.ndarray],
@@ -108,26 +106,31 @@ def plot_and_test_group_spectrograms(
     hemisphere: str,
     epoch_dur_sec: float,
     baseline_fraction: float = 0.8,
-    n_permutations: int = 100,
+    n_permutations: int = 1000,
     alpha: float = 0.05,
+    threshold_start: float = 0.5,
+    threshold_step: float = 0.1,
+    tail: int = 0,
     smooth_sigma: tuple = (1.0, 2.0),
-    f_min: float = 12.0,   # ADDED: Restore Y-axis limits from original
-    f_max: float = 30.0    # ADDED: Restore Y-axis limits from original
+    f_min: float = 12.0,
+    f_max: float = 30.0,
+    save_path: Optional[str] = None
 ):
     """
-    Plots the group-average spectrogram and performs cluster permutation test if N > 1.
+    Plots group-average spectrogram with configurable cluster permutation test.
     
     Args:
-        spectrograms_list: List of 2D arrays (n_freqs, n_times). 
-        f: Frequency array from compute_zscored_spectrogram.
-        t: Time array from compute_zscored_spectrogram. MUST span full [Move|Rest] duration.
-        epoch_dur_sec: Duration of ONE condition (Move) in seconds.
+        alpha: Significance threshold (e.g., 0.05, 0.01, 0.001).
+        threshold_start: Initial TFCE/stat threshold for clustering.
+        threshold_step: Step size for threshold search.
+        tail: 0=two-tailed, -1=left-tailed, 1=right-tailed.
+        save_path: If provided, saves figure to this path instead of only showing.
     """
     if not spectrograms_list:
         print("No valid spectrograms to plot.")
         return
 
-    X = np.stack(spectrograms_list, axis=0) # Shape: (N_subjects, n_freqs, n_times)
+    X = np.stack(spectrograms_list, axis=0)
     
     # --- CRITICAL VALIDATION ---
     expected_time_points = len(t)
@@ -136,8 +139,7 @@ def plot_and_test_group_spectrograms(
     if expected_time_points != actual_time_points:
         raise ValueError(
             f"Time axis mismatch! t has {expected_time_points} points "
-            f"but spectrograms have {actual_time_points} time points. "
-            f"Expected ~{int(epoch_dur_sec * 2 * 500 / 256)} points for 4s signal at 500Hz."
+            f"but spectrograms have {actual_time_points} time points."
         )
     
     significant_clusters = []
@@ -153,8 +155,8 @@ def plot_and_test_group_spectrograms(
             _, clusters, cluster_pv, _ = permutation_cluster_test(
                 [X],
                 n_permutations=n_permutations,
-                threshold=dict(start=0.5, step=0.1),
-                tail=0,
+                threshold=dict(start=threshold_start, step=threshold_step),
+                tail=tail,
                 stat_fun=ttest_1samp_no_p,
                 adjacency=adjacency,
                 out_type='indices',
@@ -184,63 +186,23 @@ def plot_and_test_group_spectrograms(
             sig_mask[cluster] = True
         ax.contour(t, f, sig_mask.astype(int), levels=[0.5], colors='white', linewidths=1.5)
 
-    ax.axvline(x=epoch_dur_sec, color='gray', linestyle=':', linewidth=2, label=f'Move→Rest boundary ({epoch_dur_sec}s)')
+    ax.axvline(x=epoch_dur_sec, color='gray', linestyle=':', linewidth=2, 
+               label=f'Move→Rest boundary ({epoch_dur_sec}s)')
     ref_end = epoch_dur_sec * baseline_fraction
     if baseline_fraction < 1.0:
-        ax.axvline(x=ref_end, color='red', linestyle='--', linewidth=1, alpha=0.7, label=f'Z-score ref end ({ref_end:.2f}s)')
+        ax.axvline(x=ref_end, color='red', linestyle='--', linewidth=1, alpha=0.7, 
+                   label=f'Z-score ref end ({ref_end:.2f}s)')
 
     ax.set_ylabel("Frequency (Hz)", fontsize=13)
     ax.set_xlabel("Time (s)", fontsize=13)
-    ax.set_ylim([f_min, f_max])  # RESTORED: Matches original script behavior
-    ax.set_title(f"Z-Scored Spectrogram ({hemisphere.upper()} {region})\nROI: {roi_name} (N={X.shape[0]})")
+    ax.set_ylim([f_min, f_max])
+    ax.set_title(f"Z-Scored Spectrogram ({hemisphere.upper()} {region})\n"
+                 f"ROI: {roi_name} (N={X.shape[0]}, α={alpha}, perms={n_permutations})")
     ax.legend(loc='upper right')
     fig.colorbar(mesh, ax=ax, label="Mean Z-score")
     plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Saved: {save_path}")
     plt.show()
-
-'''
-
-# EXECUTION EXAMPLE
-
-
-print("\n>>> Starting Spectrogram Analysis...")
-
-# 1. Prepare Signals using the 2D ROI epochs
-subjects_data = []
-sfreq = fs 
-
-try:
-    # The function returns both the signal AND the exact duration derived from data shape
-    concat_sig, epoch_dur = prepare_roi_signal_from_2d(move_roi_epochs, rest_roi_epochs, sfreq)
-    
-    print(f"Detected Epoch Duration: {epoch_dur} seconds")
-    
-    # Compute Spectrogram
-    f, t, sxx_z = compute_zscored_spectrogram(
-        concat_sig, sfreq, f_min=12.0, f_max=30.0, baseline_fraction=0.8
-    )
-    
-    subjects_data.append(sxx_z)
-    print(f"Processed {SUBJECT_ID}: Spectrogram shape {sxx_z.shape}")
-    
-except Exception as e:
-    print(f"Error processing {SUBJECT_ID}: {e}")
-    import traceback
-    traceback.print_exc()
-
-# 2. Plot and Test
-if subjects_data:
-    plot_and_test_group_spectrograms(
-        spectrograms_list=subjects_data,
-        f=f,
-        t=t,
-        roi_name=TARGET_ROI,
-        hemisphere="right", 
-        epoch_dur_sec=epoch_dur, 
-        baseline_fraction=0.8,
-        n_permutations=100 
-    )
-else:
-    print("No data available for plotting.")
-
-'''
