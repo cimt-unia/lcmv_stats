@@ -17,15 +17,15 @@ from .machine_learning import (
     compute_epoch_features, 
     process_signal_to_ml_dataframe
 )
+from .timefreq import (
+    prepare_roi_signal_from_2d,
+    compute_zscored_spectrogram,
+    plot_and_test_group_spectrograms
+)
 
 from ._atlas import get_cimt_labels, get_motor_network_indices
 from .batch import prepare_group_comparison, prepare_connectivity_for_stats
 from . import batch
-
-
-
-
-
 
 
 __version__ = "0.1.0"
@@ -54,7 +54,9 @@ __all__ = [
     "cohens_d_paired",
     
     # Time-Frequency
-
+    "prepare_roi_signal_from_2d",
+    "compute_zscored_spectrogram",
+    "plot_and_test_group_spectrograms",
     
     # Visualization
     "plot_connectivity_matrix",
