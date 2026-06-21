@@ -110,25 +110,39 @@ def plot_and_test_group_spectrograms(
     baseline_fraction: float = 0.8,
     n_permutations: int = 100,
     alpha: float = 0.05,
-    smooth_sigma: tuple = (1.0, 2.0)
+    smooth_sigma: tuple = (1.0, 2.0),
+    f_min: float = 12.0,   # ADDED: Restore Y-axis limits from original
+    f_max: float = 30.0    # ADDED: Restore Y-axis limits from original
 ):
     """
     Plots the group-average spectrogram and performs cluster permutation test if N > 1.
     
     Args:
-        spectrograms_list: List of 2D arrays (n_freqs, n_times). Can be from 
-                           single subjects or pre-computed group averages.
-        epoch_dur_sec: Duration of the 'Move' condition in seconds (for boundary line).
+        spectrograms_list: List of 2D arrays (n_freqs, n_times). 
+        f: Frequency array from compute_zscored_spectrogram.
+        t: Time array from compute_zscored_spectrogram. MUST span full [Move|Rest] duration.
+        epoch_dur_sec: Duration of ONE condition (Move) in seconds.
     """
     if not spectrograms_list:
         print("No valid spectrograms to plot.")
         return
 
     X = np.stack(spectrograms_list, axis=0) # Shape: (N_subjects, n_freqs, n_times)
+    
+    # --- CRITICAL VALIDATION ---
+    expected_time_points = len(t)
+    actual_time_points = X.shape[2]
+    
+    if expected_time_points != actual_time_points:
+        raise ValueError(
+            f"Time axis mismatch! t has {expected_time_points} points "
+            f"but spectrograms have {actual_time_points} time points. "
+            f"Expected ~{int(epoch_dur_sec * 2 * 500 / 256)} points for 4s signal at 500Hz."
+        )
+    
     significant_clusters = []
     
     # --- STATISTICS CHECK ---
-    # Permutation tests require variance across subjects (N > 1).
     if X.shape[0] > 1:
         nf, nt = X.shape[1], X.shape[2]
         adj_freq = np.eye(nf, k=1) + np.eye(nf, k=-1)
@@ -164,14 +178,12 @@ def plot_and_test_group_spectrograms(
     fig, ax = plt.subplots(figsize=(14, 8))
     mesh = ax.pcolormesh(t, f, smoothed, shading="gouraud", cmap="RdBu", vmin=-v, vmax=v)
 
-    # Overlay significant clusters ONLY if they exist
     if significant_clusters:
         sig_mask = np.zeros_like(avg_Sxx, dtype=bool)
         for cluster in significant_clusters:
             sig_mask[cluster] = True
         ax.contour(t, f, sig_mask.astype(int), levels=[0.5], colors='white', linewidths=1.5)
 
-    # Draw boundaries based on the dynamically calculated epoch duration
     ax.axvline(x=epoch_dur_sec, color='gray', linestyle=':', linewidth=2, label=f'Move→Rest boundary ({epoch_dur_sec}s)')
     ref_end = epoch_dur_sec * baseline_fraction
     if baseline_fraction < 1.0:
@@ -179,6 +191,7 @@ def plot_and_test_group_spectrograms(
 
     ax.set_ylabel("Frequency (Hz)", fontsize=13)
     ax.set_xlabel("Time (s)", fontsize=13)
+    ax.set_ylim([f_min, f_max])  # RESTORED: Matches original script behavior
     ax.set_title(f"Z-Scored Spectrogram ({hemisphere.upper()} {region})\nROI: {roi_name} (N={X.shape[0]})")
     ax.legend(loc='upper right')
     fig.colorbar(mesh, ax=ax, label="Mean Z-score")
