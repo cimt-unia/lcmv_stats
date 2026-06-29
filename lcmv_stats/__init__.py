@@ -40,9 +40,9 @@ from .connectivity import (
     create_directed_effect_map,
 )
 
-# ── Time-Frequency (tensor-native, concatenation-based) ──
+# ── Time-Frequency (tensor-native, epoch-averaged) ──
 from .timefreq import (
-    concatenate_condition_epochs,
+    average_condition_epochs,
     compute_spectrogram_for_subject,
     compute_group_spectrograms_from_epochs,
     plot_and_test_group_spectrograms,
@@ -64,6 +64,7 @@ from .visualization import (
     plot_feature_distribution,
     validate_matrix_quality,
 )
+
 __version__ = "0.4.0"
 
 __all__ = [
@@ -97,7 +98,7 @@ __all__ = [
     "create_directed_effect_map",
     
     # ── Time-Frequency ──
-    "concatenate_condition_epochs",
+    "average_condition_epochs",
     "compute_spectrogram_for_subject",
     "compute_group_spectrograms_from_epochs",
     "plot_and_test_group_spectrograms",
