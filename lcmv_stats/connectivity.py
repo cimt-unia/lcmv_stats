@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from mne.stats import permutation_t_test
 from mne_connectivity import spectral_connectivity_epochs
+from joblib import Parallel, delayed
 import logging
 
 from ._atlas import get_cimt_labels, select_network, resolve_roi_indices, get_available_systems
@@ -217,7 +218,15 @@ def extract_gpdc_features(
         if n_trials == 0 or n_rois < 2:
             return None
 
+        # spectral_connectivity.Multitaper expects (n_time_samples, n_trials, n_signals)
         data_reshaped = np.transpose(epochs_sub, (2, 0, 1))
+
+        # ASSERTION: Verify shape matches spectral_connectivity API contract
+        assert data_reshaped.shape == (n_samples, n_trials, n_rois), (
+            f"GPDC input shape mismatch! Expected ({n_samples}, {n_trials}, {n_rois}), "
+            f"got {data_reshaped.shape}. Check spectral_connectivity version."
+        )
+
         data_reshaped = data_reshaped - np.mean(data_reshaped, axis=0, keepdims=True)
 
         m = Multitaper(
@@ -252,7 +261,7 @@ def extract_gpdc_features(
 
 
 # =============================================================================
-# 2. STATISTICAL INFERENCE (NUMPY-NATIVE)
+# 2. STATISTICAL INFERENCE (NUMPY-NATIVE, PARALLEL)
 # =============================================================================
 
 def cohens_d_paired(group_a: np.ndarray, group_b: np.ndarray) -> np.ndarray:
@@ -281,7 +290,7 @@ def run_edgewise_permutation(
     alpha: float = 0.01
 ) -> Dict[str, np.ndarray]:
     """
-    Edge-wise non-parametric permutation tests.
+    Edge-wise non-parametric permutation tests (parallelized).
     Returns a dictionary of numpy arrays instead of a pandas DataFrame.
 
     Args:
@@ -312,28 +321,45 @@ def run_edgewise_permutation(
     n_rois = len(roi_names)
     triu_ix = np.triu_indices(n_rois, k=1)
 
-    t_stats = np.zeros(n_edges, dtype=np.float64)
-    p_vals = np.ones(n_edges, dtype=np.float64)
+    # Pre-compute summary statistics (vectorized, no loop needed)
     means_a = np.mean(data_a, axis=0)
     means_b = np.mean(data_b, axis=0)
     sds_a = np.std(data_a, axis=0, ddof=1)
     sds_b = np.std(data_b, axis=0, ddof=1)
-
-    logger.info(f"Running permutation tests on {n_edges} edges across {n_subjects} subjects...")
-
-    for i in range(n_edges):
-        diffs = (data_a[:, i] - data_b[:, i]).reshape(-1, 1)
-        if len(diffs) < 3:
-            continue
-
-        try:
-            t_obs, p_val, _ = permutation_t_test(X=diffs, n_permutations=n_permutations, tail=0)
-            t_stats[i] = t_obs[0]
-            p_vals[i] = p_val[0]
-        except Exception as e:
-            logger.warning(f"Permutation test failed for edge {i}: {e}")
-
     ds = cohens_d_paired(data_a, data_b)
+
+    # Pre-compute all difference vectors
+    diffs_all = data_a - data_b  # (n_subjects, n_edges)
+
+    logger.info(
+        f"Running permutation tests on {n_edges} edges across "
+        f"{n_subjects} subjects (parallel)..."
+    )
+
+    def _test_single_edge(edge_idx):
+        diffs = diffs_all[:, edge_idx].reshape(-1, 1)
+        if len(diffs) < 3:
+            return edge_idx, 0.0, 1.0
+        try:
+            t_obs, p_val, _ = permutation_t_test(
+                X=diffs, n_permutations=n_permutations, tail=0
+            )
+            return edge_idx, t_obs[0], p_val[0]
+        except Exception as e:
+            logger.warning(f"Permutation test failed for edge {edge_idx}: {e}")
+            return edge_idx, 0.0, 1.0
+
+    # Parallel execution across all edges
+    results = Parallel(n_jobs=-1, prefer="threads")(
+        delayed(_test_single_edge)(i) for i in range(n_edges)
+    )
+
+    # Unpack results into pre-allocated arrays
+    t_stats = np.zeros(n_edges, dtype=np.float64)
+    p_vals = np.ones(n_edges, dtype=np.float64)
+    for edge_idx, t_val, p_val in results:
+        t_stats[edge_idx] = t_val
+        p_vals[edge_idx] = p_val
 
     edge_indices = np.column_stack([triu_ix[0][:n_edges], triu_ix[1][:n_edges]]).astype(np.uint32)
 
@@ -370,6 +396,7 @@ def compare_tensors(
     End-to-end comparison of two condition tensors.
     Z-scoring is applied to continuous data before epoching.
 
+    Handles subject mismatches gracefully by intersecting subject lists.
     ROI selection is flexible: provide explicit names, metadata filters,
     or leave blank for default Motor-Basal-Executive-STN network.
 
@@ -387,18 +414,35 @@ def compare_tensors(
     tens_a = load_tensor(tensor_path_a)
     tens_b = load_tensor(tensor_path_b)
 
-    if not np.array_equal(tens_a['subject_ids'], tens_b['subject_ids']):
-        raise ValueError("Subject IDs mismatch between tensors.")
+    # ── FIX #1: Robust subject alignment via intersection ──
+    ids_a = tens_a['subject_ids']
+    ids_b = tens_b['subject_ids']
+
+    common_ids, idx_a, idx_b = np.intersect1d(ids_a, ids_b, return_indices=True)
+
+    if len(common_ids) == 0:
+        raise ValueError(
+            f"No common subjects between tensors. "
+            f"A has {len(ids_a)}, B has {len(ids_b)}."
+        )
+
+    if len(common_ids) < len(ids_a) or len(common_ids) < len(ids_b):
+        logger.warning(
+            f"Subject mismatch: using {len(common_ids)} common subjects "
+            f"(A had {len(ids_a)}, B had {len(ids_b)})"
+        )
 
     sfreq = tens_a['sfreq']
 
-    ep_a = epoch_tensor(tens_a['data'], sfreq, epoch_duration, overlap, do_zscore)
-    ep_b = epoch_tensor(tens_b['data'], sfreq, epoch_duration, overlap, do_zscore)
+    # Epoch only the aligned subset of data
+    ep_a = epoch_tensor(tens_a['data'][idx_a], sfreq, epoch_duration, overlap, do_zscore)
+    ep_b = epoch_tensor(tens_b['data'][idx_b], sfreq, epoch_duration, overlap, do_zscore)
 
     mats_a, mats_b, valid_subs = [], [], []
     roi_indices_used = None
 
-    for i, sid in enumerate(tens_a['subject_ids']):
+    # Iterate over aligned subjects only
+    for i, sid in enumerate(common_ids):
         conn_a, conn_b, indices = extract_wpli_features(
             ep_a[i], ep_b[i],
             roi_names=roi_names,
