@@ -189,13 +189,18 @@ def prepare_ml_dataset(
         ep_b, sfreq, freq_bands, roi_indices=roi_idx, log_transform=log_transform
     )
 
+
+
     # Build labels: 0 = Condition A, 1 = Condition B
+    # Labels must match flattened sample count: n_subj * (n_ep_a + n_ep_b)
     n_ep_a = feat_a.shape[1]
     n_ep_b = feat_b.shape[1]
-    labels = np.concatenate([
+    n_subj = feat_a.shape[0]
+    labels_per_subj = np.concatenate([
         np.zeros(n_ep_a, dtype=np.int8),
         np.ones(n_ep_b, dtype=np.int8)
     ])
+    labels = np.tile(labels_per_subj, n_subj)
 
     # Get ROI names for metadata
     atlas_df = get_cimt_labels()
