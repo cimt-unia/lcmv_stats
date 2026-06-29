@@ -3,12 +3,11 @@
 """
 Time-frequency analysis tools for CIMT source-space data (Tensor-Native).
 
-Operates on 4D epoch arrays (n_epochs, n_rois, n_samples) extracted from
-5D epoched tensors produced by lcmv_stats.epoching.epoch_tensor.
+Operates on 5D epoched tensors (n_subjects, n_epochs, n_rois, n_samples)
+produced by lcmv_stats.epoching.epoch_tensor.
 
-Z-scoring is assumed to have been applied BEFORE epoching (in epoch_tensor),
-so spectrograms here represent normalized power relative to the full
-continuous recording baseline.
+Concatenates epochs from two conditions along the epoch axis per subject/ROI,
+then computes Z-scored spectrograms with Condition A as baseline reference.
 """
 
 import numpy as np
@@ -17,93 +16,188 @@ from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
 import logging
 from mne.stats import permutation_cluster_test, combine_adjacency, ttest_1samp_no_p
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Literal
+
+from .utils import load_tensor
+from .epoching import epoch_tensor
+from ._atlas import resolve_roi_indices, get_cimt_labels
 
 logger = logging.getLogger(__name__)
 
 
-def compute_roi_spectrogram(
-    epochs: np.ndarray,
-    roi_index: int,
+def concatenate_condition_epochs(
+    epochs_a: np.ndarray,
+    epochs_b: np.ndarray,
+    roi_index: int
+) -> Tuple[np.ndarray, int]:
+    """
+    Concatenate epochs from two conditions along the epoch axis for a single ROI.
+
+    Args:
+        epochs_a: (n_epochs_a, n_rois, n_samples) — Condition A epochs for one subject.
+        epochs_b: (n_epochs_b, n_rois, n_samples) — Condition B epochs for one subject.
+        roi_index: Index into axis 1 for the target ROI.
+
+    Returns:
+        concat_signal: 1D array of shape (n_epochs_total * n_samples,)
+                       formed by flattening [A_epochs | B_epochs] for the ROI.
+        n_epochs_a: Number of Condition A epochs (for boundary calculation).
+    """
+    if epochs_a.ndim != 3 or epochs_b.ndim != 3:
+        raise ValueError("Inputs must be 3D (n_epochs, n_rois, n_samples).")
+
+    # Extract single ROI: (n_epochs, n_samples)
+    roi_a = epochs_a[:, roi_index, :]
+    roi_b = epochs_b[:, roi_index, :]
+
+    # Flatten each condition's epochs into a continuous 1D signal
+    sig_a = roi_a.ravel()  # (n_epochs_a * n_samples,)
+    sig_b = roi_b.ravel()  # (n_epochs_b * n_samples,)
+
+    concat_signal = np.concatenate([sig_a, sig_b])
+    return concat_signal, roi_a.shape[0]
+
+
+def compute_spectrogram_for_subject(
+    sig: np.ndarray,
     sfreq: float,
+    n_samples_per_epoch: int,
+    n_epochs_a: int,
     f_min: float = 12.0,
     f_max: float = 30.0,
+    normalize_mode: Literal["none", "condition_a"] = "condition_a",
     nperseg_override: Optional[int] = None
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Compute grand-average spectrogram for a single ROI across all epochs.
-
-    Since Z-scoring was applied to continuous data before epoching,
-    the resulting spectrogram reflects deviation from the full-recording
-    mean/std — no additional baseline correction is needed.
+    Compute spectrogram for a single subject's concatenated epoch signal.
 
     Args:
-        epochs: Shape (n_epochs, n_rois, n_samples). From epoch_tensor[i].
-        roi_index: Index into axis 1 for the target ROI.
+        sig: 1D concatenated signal [CondA_epochs | CondB_epochs] for one ROI.
         sfreq: Sampling frequency in Hz.
-        f_min: Minimum frequency of interest.
-        f_max: Maximum frequency of interest.
-        nperseg_override: If provided, overrides automatic window size.
+        n_samples_per_epoch: Number of samples per epoch.
+        n_epochs_a: Number of Condition A epochs (defines baseline region).
+        f_min, f_max: Frequency range of interest.
+        normalize_mode:
+            "none": Raw PSD.
+            "condition_a": Z-score using only Condition A portion as baseline.
+        nperseg_override: Override automatic window size.
 
     Returns:
-        (f_filt, t, Sxx_avg) where Sxx_avg is (n_freqs, n_times).
+        (f_filt, t, Sxx_out) where Sxx_out is Z-scored or raw.
     """
-    if epochs.ndim != 3:
-        raise ValueError(f"Expected 3D epochs (n_epochs, n_rois, n_samples), got shape {epochs.shape}")
-
-    # Extract single ROI: (n_epochs, n_samples)
-    roi_data = epochs[:, roi_index, :]
-    n_epochs, n_samples = roi_data.shape
-
-    if n_samples < 4:
-        raise ValueError(f"Epoch too short ({n_samples} samples) for spectrogram.")
-
-    # Adaptive window: 1 second or half the epoch length, whichever is smaller
     if nperseg_override is not None:
         nperseg = nperseg_override
     else:
-        nperseg = min(int(sfreq * 1.0), n_samples // 2)
+        nperseg = min(int(sfreq * 1.0), len(sig) // 2)
     nperseg = max(4, nperseg)
     noverlap = int(nperseg * 0.75)
 
-    # Compute PSD per epoch, then average
-    freqs_all = None
-    psd_sum = None
-
-    for e in range(n_epochs):
-        try:
-            f, _, Sxx = signal.spectrogram(
-                roi_data[e], fs=sfreq, window="hann",
-                nperseg=nperseg, noverlap=noverlap,
-                scaling="density", mode="psd"
-            )
-        except Exception as ex:
-            logger.warning(f"Spectrogram failed for epoch {e}: {ex}")
-            continue
-
-        if freqs_all is None:
-            freqs_all = f
-            psd_sum = Sxx.copy()
-        else:
-            psd_sum += Sxx
-
-    if freqs_all is None:
+    try:
+        f, t, Sxx = signal.spectrogram(
+            sig, fs=sfreq, window="hann",
+            nperseg=nperseg, noverlap=noverlap,
+            scaling="density", mode="psd"
+        )
+    except Exception as e:
+        logger.error(f"Spectrogram computation failed: {e}")
         return np.array([]), np.array([]), np.array([])
 
-    Sxx_avg = psd_sum / n_epochs
+    freq_mask = (f >= f_min) & (f <= f_max)
+    f_filt = f[freq_mask]
+    Sxx_filt = Sxx[freq_mask, :]
 
-    # Filter to frequency band of interest
-    freq_mask = (freqs_all >= f_min) & (freqs_all <= f_max)
-    f_filt = freqs_all[freq_mask]
-    Sxx_filt = Sxx_avg[freq_mask, :]
+    # --- Baseline Normalization ---
+    if normalize_mode == "condition_a":
+        # Condition A occupies the first n_epochs_a * n_samples_per_epoch samples
+        boundary_sample = n_epochs_a * n_samples_per_epoch
+        # Map sample boundary to time index
+        samples_per_time_bin = nperseg - noverlap
+        boundary_time_idx = boundary_sample / samples_per_time_bin
+        ref_mask = t <= boundary_time_idx
+    else:
+        ref_mask = None
 
-    # Convert to log scale for visualization stability
-    Sxx_log = np.log10(Sxx_filt + 1e-15)
+    if ref_mask is not None and np.any(ref_mask):
+        ref_mean = Sxx_filt[:, ref_mask].mean(axis=1, keepdims=True)
+        ref_std = Sxx_filt[:, ref_mask].std(axis=1, keepdims=True)
+        floor_val = np.maximum(np.abs(ref_mean) * 0.01, 1e-30)
+        ref_std = np.where(ref_std < floor_val, floor_val, ref_std)
+        Sxx_out = (Sxx_filt - ref_mean) / ref_std
+    else:
+        if normalize_mode == "condition_a":
+            logger.warning("No time points in Condition A baseline. Returning raw PSD.")
+        Sxx_out = Sxx_filt
 
-    # Time axis
-    t = np.arange(Sxx_filt.shape[1]) * (nperseg - noverlap) / sfreq
+    return f_filt, t, Sxx_out
 
-    return f_filt, t, Sxx_log
+
+def compute_group_spectrograms_from_tensors(
+    tensor_path_a: str,
+    tensor_path_b: str,
+    roi_name: str,
+    sfreq: float,
+    epoch_duration: float = 2.0,
+    overlap: float = 0.5,
+    f_min: float = 12.0,
+    f_max: float = 30.0,
+    normalize_mode: Literal["none", "condition_a"] = "condition_a"
+) -> Tuple[List[np.ndarray], np.ndarray, np.ndarray, float]:
+    """
+    End-to-end: Load two condition tensors → epoch → concatenate → spectrograms.
+
+    Args:
+        tensor_path_a: Path to Condition A .npz tensor.
+        tensor_path_b: Path to Condition B .npz tensor.
+        roi_name: CIMT ROI name (e.g., 'L_4_ROI').
+        sfreq: Sampling frequency.
+        epoch_duration: Epoch duration in seconds.
+        overlap: Epoch overlap fraction.
+        f_min, f_max: Frequency range.
+        normalize_mode: Baseline normalization mode.
+
+    Returns:
+        (spectrograms_list, f, t, boundary_sec)
+        spectrograms_list: List of 2D arrays (n_freqs, n_times), one per subject.
+        boundary_sec: Time in seconds where Condition A ends.
+    """
+    tens_a = load_tensor(tensor_path_a)
+    tens_b = load_tensor(tensor_path_b)
+
+    if not np.array_equal(tens_a['subject_ids'], tens_b['subject_ids']):
+        raise ValueError("Subject IDs mismatch between tensors.")
+
+    # Epoch both tensors (Z-scoring applied before epoching)
+    ep_a = epoch_tensor(tens_a['data'], sfreq, epoch_duration, overlap, do_zscore=True)
+    ep_b = epoch_tensor(tens_b['data'], sfreq, epoch_duration, overlap, do_zscore=True)
+
+    # Resolve ROI index
+    roi_idx = resolve_roi_indices([roi_name])[0]
+    n_samples_per_epoch = ep_a.shape[3]
+
+    spectrograms = []
+    f_out, t_out = None, None
+
+    for i in range(len(tens_a['subject_ids'])):
+        concat_sig, n_epochs_a = concatenate_condition_epochs(
+            ep_a[i], ep_b[i], roi_index=roi_idx
+        )
+
+        f, t, sxx = compute_spectrogram_for_subject(
+            concat_sig, sfreq, n_samples_per_epoch, n_epochs_a,
+            f_min=f_min, f_max=f_max, normalize_mode=normalize_mode
+        )
+
+        if sxx.size > 0:
+            spectrograms.append(sxx)
+            if f_out is None:
+                f_out, t_out = f, t
+
+    # Boundary in seconds: n_epochs_a * epoch_duration
+    # (accounts for overlap: actual time covered = n_epochs_a * step_duration)
+    step_sec = epoch_duration * (1 - overlap)
+    boundary_sec = n_epochs_a * step_sec
+
+    return spectrograms, f_out, t_out, boundary_sec
 
 
 def plot_and_test_group_spectrograms(
@@ -112,6 +206,7 @@ def plot_and_test_group_spectrograms(
     t: np.ndarray,
     roi_name: str,
     hemisphere: str,
+    boundary_sec: float,
     n_permutations: int = 1000,
     alpha: float = 0.05,
     threshold_start: float = 0.5,
@@ -125,31 +220,26 @@ def plot_and_test_group_spectrograms(
     """
     Plots group-average spectrogram with cluster-based permutation test.
 
-    Each element in spectrograms_list is a 2D array (n_freqs, n_times)
-    from compute_roi_spectrogram for one subject.
-
     Args:
-        spectrograms_list: List of 2D arrays, one per subject.
-        f: Frequency bins from compute_roi_spectrogram.
-        t: Time bins from compute_roi_spectrogram.
-        roi_name: Label for the ROI being plotted.
-        hemisphere: 'L' or 'R' for title formatting.
+        spectrograms_list: List of 2D arrays (n_freqs, n_times), one per subject.
+        f, t: Frequency and time bins from compute_spectrogram_for_subject.
+        roi_name: Label for the ROI.
+        hemisphere: 'L' or 'R'.
+        boundary_sec: Time in seconds where Condition A ends and B begins.
         n_permutations: Number of permutations for cluster test.
         alpha: Significance threshold.
-        threshold_start: Initial TFCE/stat threshold.
-        threshold_step: Step size for threshold search.
+        threshold_start, threshold_step: TFCE/stat threshold parameters.
         tail: 0=two-tailed, -1=left, 1=right.
         smooth_sigma: Gaussian smoothing sigma for display.
-        f_min, f_max: Frequency limits for y-axis.
+        f_min, f_max: Y-axis frequency limits.
         save_path: If provided, saves figure instead of showing.
     """
     if not spectrograms_list:
         logger.warning("No valid spectrograms to plot.")
         return
 
-    X = np.stack(spectrograms_list, axis=0)  # (N_subjects, N_freqs, N_times)
+    X = np.stack(spectrograms_list, axis=0)
 
-    # Validate time axis alignment
     if X.shape[2] != len(t):
         raise ValueError(
             f"Time axis mismatch! t has {len(t)} points "
@@ -158,7 +248,6 @@ def plot_and_test_group_spectrograms(
 
     significant_clusters = []
 
-    # Cluster-based permutation test (only if >1 subject)
     if X.shape[0] > 1:
         nf, nt = X.shape[1], X.shape[2]
         adj_freq = np.eye(nf, k=1) + np.eye(nf, k=-1)
@@ -184,7 +273,6 @@ def plot_and_test_group_spectrograms(
     else:
         logger.info("Skipping statistics: Only 1 subject provided.")
 
-    # Grand average + smoothing for display
     avg_Sxx = np.mean(X, axis=0)
     smoothed = gaussian_filter(avg_Sxx, sigma=smooth_sigma)
 
@@ -200,15 +288,18 @@ def plot_and_test_group_spectrograms(
             sig_mask[cluster] = True
         ax.contour(t, f, sig_mask.astype(int), levels=[0.5], colors='white', linewidths=1.5)
 
+    ax.axvline(x=boundary_sec, color='gray', linestyle=':', linewidth=2,
+               label=f'Condition Boundary ({boundary_sec:.2f}s)')
+
     ax.set_ylabel("Frequency (Hz)", fontsize=13)
-    ax.set_xlabel("Time within epoch (s)", fontsize=13)
+    ax.set_xlabel("Time (s)", fontsize=13)
     ax.set_ylim([f_min, f_max])
     ax.set_title(
         f"Group Spectrogram ({hemisphere.upper()} {region})\n"
         f"ROI: {roi_name} (N={X.shape[0]}, α={alpha}, perms={n_permutations})"
     )
     ax.legend(loc='upper right')
-    fig.colorbar(mesh, ax=ax, label="Mean log₁₀(PSD)")
+    fig.colorbar(mesh, ax=ax, label="Mean Z-score")
     plt.tight_layout()
 
     if save_path:
