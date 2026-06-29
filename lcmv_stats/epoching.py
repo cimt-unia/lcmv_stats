@@ -13,6 +13,75 @@ from .utils import get_subject_sfreq
 
 logger = logging.getLogger(__name__)
 
+
+def extract_continuous_epochs(
+    subject_id: str,
+    lcmv_root: Path,
+    condition: str = "bima_off",
+    epoch_duration: float = 2.0,
+    overlap: float = 0.0,
+    do_zscore: bool = False
+) -> np.ndarray:
+    """
+    Extract epochs from continuous CIMT time courses using a sliding window.
+    Assumes data is already preprocessed (filtered/cleaned) by lcmv_xtra.
+    
+    Args:
+        subject_id: Subject identifier.
+        lcmv_root: Root path to LCMV derivatives.
+        condition: Condition folder name.
+        epoch_duration: Duration of each epoch in seconds.
+        overlap: Overlap fraction (0.0 to 1.0).
+        do_zscore: Whether to Z-score each ROI time course before epoching.
+        
+    Returns:
+        np.ndarray: Shape (n_epochs, n_rois, n_samples).
+    """
+    sfreq = get_subject_sfreq(subject_id, lcmv_root, condition)
+    subj_dir = lcmv_root / f"{subject_id}_{condition}"
+    
+    # Load continuous CIMT time courses
+    cimt_file = subj_dir / "cimt_time_courses.npy"
+    if not cimt_file.exists():
+        raise FileNotFoundError(f"CIMT time courses not found: {cimt_file}")
+        
+    try:
+        tc = np.load(cimt_file) # Shape: (448, T)
+    except Exception as e:
+        raise ValueError(f"Failed to load CIMT data: {e}")
+
+    n_rois, n_times = tc.shape
+    
+    # 1. Optional Z-scoring per ROI (for resting-state normalization)
+    if do_zscore:
+        mu = np.mean(tc, axis=1, keepdims=True)
+        sigma = np.std(tc, axis=1, keepdims=True)
+        # Prevent division by zero
+        sigma = np.where(sigma < 1e-12, 1.0, sigma)
+        tc = (tc - mu) / sigma
+
+    # 2. Window into epochs
+    ep_samp = int(epoch_duration * sfreq)
+    step = int(ep_samp * (1 - overlap))
+    
+    if n_times < ep_samp:
+        logger.warning(f"Subject {subject_id}: Data length ({n_times}) shorter than epoch duration ({ep_samp}).")
+        return np.empty((0, n_rois, ep_samp))
+        
+    n_ep = ((n_times - ep_samp) // step) + 1
+    if n_ep <= 0:
+        return np.empty((0, n_rois, ep_samp))
+        
+    epochs = np.empty((n_ep, n_rois, ep_samp))
+    for i in range(n_ep):
+        s = i * step
+        epochs[i] = tc[:, s:s + ep_samp]
+        
+    logger.info(f"Extracted {n_ep} continuous epochs for {subject_id} at {sfreq}Hz")
+    return epochs
+
+
+
 def extract_event_epochs(
     subject_id: str, 
     lcmv_root: Path, 
@@ -84,69 +153,3 @@ def extract_event_epochs(
         return np.empty((0, n_rois, 0)), np.empty((0, n_rois, 0))
         
     return np.stack(all_pre), np.stack(all_post)
-
-def extract_continuous_epochs(
-    subject_id: str,
-    lcmv_root: Path,
-    condition: str = "bima_off",
-    epoch_duration: float = 2.0,
-    overlap: float = 0.0,
-    do_zscore: bool = False
-) -> np.ndarray:
-    """
-    Extract epochs from continuous CIMT time courses using a sliding window.
-    Assumes data is already preprocessed (filtered/cleaned) by lcmv_xtra.
-    
-    Args:
-        subject_id: Subject identifier.
-        lcmv_root: Root path to LCMV derivatives.
-        condition: Condition folder name.
-        epoch_duration: Duration of each epoch in seconds.
-        overlap: Overlap fraction (0.0 to 1.0).
-        do_zscore: Whether to Z-score each ROI time course before epoching.
-        
-    Returns:
-        np.ndarray: Shape (n_epochs, n_rois, n_samples).
-    """
-    sfreq = get_subject_sfreq(subject_id, lcmv_root, condition)
-    subj_dir = lcmv_root / f"{subject_id}_{condition}"
-    
-    # Load continuous CIMT time courses
-    cimt_file = subj_dir / "cimt_time_courses.npy"
-    if not cimt_file.exists():
-        raise FileNotFoundError(f"CIMT time courses not found: {cimt_file}")
-        
-    try:
-        tc = np.load(cimt_file) # Shape: (448, T)
-    except Exception as e:
-        raise ValueError(f"Failed to load CIMT data: {e}")
-
-    n_rois, n_times = tc.shape
-    
-    # 1. Optional Z-scoring per ROI (for resting-state normalization)
-    if do_zscore:
-        mu = np.mean(tc, axis=1, keepdims=True)
-        sigma = np.std(tc, axis=1, keepdims=True)
-        # Prevent division by zero
-        sigma = np.where(sigma < 1e-12, 1.0, sigma)
-        tc = (tc - mu) / sigma
-
-    # 2. Window into epochs
-    ep_samp = int(epoch_duration * sfreq)
-    step = int(ep_samp * (1 - overlap))
-    
-    if n_times < ep_samp:
-        logger.warning(f"Subject {subject_id}: Data length ({n_times}) shorter than epoch duration ({ep_samp}).")
-        return np.empty((0, n_rois, ep_samp))
-        
-    n_ep = ((n_times - ep_samp) // step) + 1
-    if n_ep <= 0:
-        return np.empty((0, n_rois, ep_samp))
-        
-    epochs = np.empty((n_ep, n_rois, ep_samp))
-    for i in range(n_ep):
-        s = i * step
-        epochs[i] = tc[:, s:s + ep_samp]
-        
-    logger.info(f"Extracted {n_ep} continuous epochs for {subject_id} at {sfreq}Hz")
-    return epochs
