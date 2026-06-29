@@ -1,27 +1,34 @@
 # lcmv_stats/__init__.py
 """
-lcmv_stats: Tensor-native statistical analysis for LCMV source-space EEG/MEG.
+lcmv_stats: Tensor-native statistical analysis for CIMT source-space EEG/MEG.
 
 Operates exclusively on standardized .npz tensors from lcmv_xtra.assemble_tensor.
 Z-scoring is applied to continuous data before epoching (in epoch_tensor).
-
-All connectivity results use pure NumPy arrays — no pandas intermediates.
+All outputs are pure NumPy arrays — no pandas intermediates in computation paths.
 """
 
-# Atlas & ROI utilities
+# ── Atlas & ROI Selection ──
 from ._atlas import (
     get_cimt_labels,
-    get_motor_network_indices,
+    resolve_roi_indices,
+    select_network,
+    get_available_systems,
+    # Backward compatibility wrappers
     get_roi_index,
+    get_motor_network_indices,
     get_motor_network_metadata,
 )
-from .utils import load_tensor, get_roi_indices
 
-# Epoching (with pre-epoch Z-scoring)
+# ── Tensor I/O ──
+from .utils import load_tensor
+
+# ── Epoching (with pre-epoch Z-scoring) ──
 from .epoching import epoch_tensor
 
-# Connectivity, Statistics, Batch, Reporting (unified module)
+# ── Connectivity & Statistics (unified module) ──
 from .connectivity import (
+    get_frequency_bands,
+    compute_connectivity_matrix,
     extract_wpli_features,
     extract_gpdc_features,
     cohens_d_paired,
@@ -33,45 +40,39 @@ from .connectivity import (
     create_directed_effect_map,
 )
 
-# Time-Frequency (tensor-native)
+# ── Time-Frequency (tensor-native, concatenation-based) ──
 from .timefreq import (
-    compute_roi_spectrogram,
+    concatenate_condition_epochs,
+    compute_spectrogram_for_subject,
+    compute_group_spectrograms_from_tensors,
     plot_and_test_group_spectrograms,
 )
 
-# Visualization (inspection tools)
-from .visualization import (
-    plot_connectivity_matrix,
-    validate_matrix_quality,
-    plot_psd_rois,
-    plot_psd_comparison,
-    plot_spectrogram,
-    plot_feature_distribution,
-)
-
-# Machine Learning Feature Engineering
+# ── Machine Learning Feature Engineering (tensor-native) ──
 from .machine_learning import (
-    get_frequency_bands,
-    zscore_normalization,
-    create_epochs,
-    compute_epoch_features,
-    process_signal_to_ml_dataframe,
+    extract_band_power_features,
+    prepare_ml_dataset,
+    flatten_for_sklearn,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     # ── Atlas & ROI ──
     "get_cimt_labels",
-    "get_motor_network_indices",
+    "resolve_roi_indices",
+    "select_network",
+    "get_available_systems",
     "get_roi_index",
+    "get_motor_network_indices",
     "get_motor_network_metadata",
-    "get_roi_indices",
     # ── Tensor I/O ──
     "load_tensor",
     # ── Epoching ──
     "epoch_tensor",
     # ── Connectivity & Statistics ──
+    "get_frequency_bands",
+    "compute_connectivity_matrix",
     "extract_wpli_features",
     "extract_gpdc_features",
     "cohens_d_paired",
@@ -79,23 +80,15 @@ __all__ = [
     "run_edgewise_permutation",
     "compare_tensors",
     "save_comparison_results",
-    # ── Reporting ──
     "plot_top_edges",
     "create_directed_effect_map",
     # ── Time-Frequency ──
-    "compute_roi_spectrogram",
+    "concatenate_condition_epochs",
+    "compute_spectrogram_for_subject",
+    "compute_group_spectrograms_from_tensors",
     "plot_and_test_group_spectrograms",
-    # ── Visualization ──
-    "plot_connectivity_matrix",
-    "validate_matrix_quality",
-    "plot_psd_rois",
-    "plot_psd_comparison",
-    "plot_spectrogram",
-    "plot_feature_distribution",
     # ── Machine Learning ──
-    "get_frequency_bands",
-    "zscore_normalization",
-    "create_epochs",
-    "compute_epoch_features",
-    "process_signal_to_ml_dataframe",
+    "extract_band_power_features",
+    "prepare_ml_dataset",
+    "flatten_for_sklearn",
 ]
