@@ -379,7 +379,6 @@ def run_edgewise_permutation(
 # =============================================================================
 # 3. BATCH TENSOR COMPARISON
 # =============================================================================
-
 def compare_tensors(
     tensor_path_a: str | Path,
     tensor_path_b: str | Path,
@@ -390,26 +389,11 @@ def compare_tensors(
     band: str = "low_beta",
     epoch_duration: float = 2.0,
     overlap: float = 0.0,
-    do_zscore: bool = True
+    do_zscore: bool = True,
+    n_permutations: int = 5000 
 ) -> Dict:
     """
     End-to-end comparison of two condition tensors.
-    Z-scoring is applied to continuous data before epoching.
-
-    Handles subject mismatches gracefully by intersecting subject lists.
-    ROI selection is flexible: provide explicit names, metadata filters,
-    or leave blank for default Motor-Basal-Executive-STN network.
-
-    Returns:
-        {
-            'per_subject': {
-                'data_a': (n_subj, n_edges),
-                'data_b': (n_subj, n_edges),
-                'subject_ids': (n_subj,)
-            },
-            'group_summary': Dict of numpy arrays (see run_edgewise_permutation),
-            'metadata': dict
-        }
     """
     tens_a = load_tensor(tensor_path_a)
     tens_b = load_tensor(tensor_path_b)
@@ -421,16 +405,10 @@ def compare_tensors(
     common_ids, idx_a, idx_b = np.intersect1d(ids_a, ids_b, return_indices=True)
 
     if len(common_ids) == 0:
-        raise ValueError(
-            f"No common subjects between tensors. "
-            f"A has {len(ids_a)}, B has {len(ids_b)}."
-        )
+        raise ValueError(f"No common subjects between tensors. A has {len(ids_a)}, B has {len(ids_b)}.")
 
     if len(common_ids) < len(ids_a) or len(common_ids) < len(ids_b):
-        logger.warning(
-            f"Subject mismatch: using {len(common_ids)} common subjects "
-            f"(A had {len(ids_a)}, B had {len(ids_b)})"
-        )
+        logger.warning(f"Subject mismatch: using {len(common_ids)} common subjects (A had {len(ids_a)}, B had {len(ids_b)})")
 
     sfreq = tens_a['sfreq']
 
@@ -469,7 +447,9 @@ def compare_tensors(
 
     subj_a = prepare_connectivity_for_stats(mats_a)
     subj_b = prepare_connectivity_for_stats(mats_b)
-    stats_dict = run_edgewise_permutation(subj_a, subj_b, roi_names=selected_roi_names)
+    
+    # <--- PASS n_permutations HERE
+    stats_dict = run_edgewise_permutation(subj_a, subj_b, roi_names=selected_roi_names, n_permutations=n_permutations)
 
     return {
         "per_subject": {
