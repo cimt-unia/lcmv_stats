@@ -1,3 +1,5 @@
+# lcmv_stats/connectivity.py
+
 """
 Connectivity feature extraction for CIMT source-space data.
 Delegates to lcmv_xtra for WPLI and implements GPDC for significant edges.
@@ -22,8 +24,8 @@ def extract_wpli_features(
     Compute WPLI for the CIMT motor network.
     
     Args:
-        epochs_in: In-phase epochs (n_epochs, n_rois, n_times).
-        epochs_out: Out-phase epochs (n_epochs, n_rois, n_times).
+        epochs_in:  (n_epochs, n_rois, n_times) — from epoch_tensor[i]
+        epochs_out: Same shape as epochs_in.
         band: Frequency band name.
         sfreq: Sampling frequency.
         
@@ -42,6 +44,7 @@ def extract_wpli_features(
         logger.error(f"WPLI calculation failed: {e}")
         return None, None
 
+
 def extract_gpdc_features(
     epochs_in: np.ndarray,
     epochs_out: np.ndarray,
@@ -52,51 +55,42 @@ def extract_gpdc_features(
     n_tapers: int = 5
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[str]]:
     """
-    Compute GPDC only for ROIs involved in significant edges from the permutation test.
-    Follows the logic of '8_General_Direct_Coh' but with internal robustness fixes.
+    Compute GPDC only for ROIs involved in significant edges.
     
     Args:
-        epochs_in: In-phase epochs (n_epochs, 448, n_times).
-        epochs_out: Out-phase epochs (n_epochs, 448, n_times).
-        sig_df: DataFrame from run_edgewise_permutation containing significant edges.
+        epochs_in/out: Shape (n_epochs, 448, n_times).
+        sig_df: DataFrame from run_edgewise_permutation with significant edges.
         sfreq: Sampling frequency.
-        band_range: Tuple (low_freq, high_freq).
+        band_range: (low_freq, high_freq) tuple.
         
     Returns:
-        Tuple of (in_gpdc_matrix, out_gpdc_matrix, list_of_roi_names)
+        (in_gpdc_matrix, out_gpdc_matrix, valid_roi_names)
     """
     if sig_df.empty or epochs_in.size == 0:
         return None, None, []
 
-    # 1. Identify unique ROIs from significant edges
     roi_names = sorted(set(sig_df['roi1'].unique()) | set(sig_df['roi2'].unique()))
     
-    # 2. Get indices for these ROIs from the CIMT atlas
     atlas_df = get_cimt_labels()
-    roi_indices = []
-    valid_rois = []
+    roi_indices, valid_rois = [], []
     
     for name in roi_names:
         match = atlas_df[atlas_df['roi_name'] == name]
         if not match.empty:
             idx = int(match.iloc[0]['index'])
-            # Ensure index is within bounds of the epoch data
             if idx < epochs_in.shape[1]:
                 roi_indices.append(idx)
                 valid_rois.append(name)
             else:
-                logger.warning(f"ROI {name} index {idx} out of bounds for epoch data shape {epochs_in.shape}")
+                logger.warning(f"ROI {name} index {idx} out of bounds.")
             
     if not roi_indices:
         logger.warning("No valid ROI indices found for GPDC subset.")
         return None, None, []
         
-    # 3. Subset epochs to only these significant ROIs
-    # Shape: (n_epochs, n_sig_rois, n_times)
     in_subset = epochs_in[:, roi_indices, :]
     out_subset = epochs_out[:, roi_indices, :]
     
-    # 4. Compute GPDC using spectral_connectivity
     try:
         from spectral_connectivity import Multitaper, Connectivity
     except ImportError:
@@ -107,11 +101,7 @@ def extract_gpdc_features(
         if n_trials == 0 or n_rois < 2:
             return None
             
-        # Reshape for spectral_connectivity: (n_time_samples, n_trials, n_signals)
         data_reshaped = np.transpose(epochs_sub, (2, 0, 1))
-        
-        # FIX: Center the data to help with Cholesky decomposition
-        # This removes the DC offset and ensures the covariance matrix is positive definite
         data_reshaped = data_reshaped - np.mean(data_reshaped, axis=0, keepdims=True)
         
         m = Multitaper(
@@ -119,7 +109,7 @@ def extract_gpdc_features(
             sampling_frequency=sfreq,
             time_halfbandwidth_product=nw,
             n_tapers=n_tapers,
-            detrend_type='constant', # Handles DC offset internally as per reference
+            detrend_type='constant',
             is_low_bias=True
         )
         
@@ -130,12 +120,10 @@ def extract_gpdc_features(
             gpdc_full = gpdc_full[0, :, :, :]
             
         freqs = c.frequencies
-        low, high = band_range
-        freq_idx = np.where((freqs >= low) & (freqs <= high))[0]
+        freq_idx = np.where((freqs >= band_range[0]) & (freqs <= band_range[1]))[0]
         
         if len(freq_idx) == 0:
             return None
-            
         return np.mean(gpdc_full[freq_idx, :, :], axis=0)
 
     try:
