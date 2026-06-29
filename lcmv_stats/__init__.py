@@ -18,8 +18,9 @@ from .machine_learning import (
     process_signal_to_ml_dataframe
 )
 from .timefreq import (
-    prepare_roi_signal_from_2d,
-    compute_zscored_spectrogram,
+    concatenate_condition_signals,
+    compute_spectrogram_for_subject,
+    prepare_subject_signals,
     plot_and_test_group_spectrograms
 )
 
@@ -54,8 +55,9 @@ __all__ = [
     "cohens_d_paired",
     
     # Time-Frequency
-    "prepare_roi_signal_from_2d",
-    "compute_zscored_spectrogram",
+    "concatenate_condition_signals",
+    "compute_spectrogram_for_subject",
+    "prepare_subject_signals",
     "plot_and_test_group_spectrograms",
     
     # Visualization
