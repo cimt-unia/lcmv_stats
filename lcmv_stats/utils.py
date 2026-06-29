@@ -1,78 +1,50 @@
 # lcmv_stats/utils.py
 
-import json
-import re
 import numpy as np
 from pathlib import Path
-from typing import Optional
 import logging
-
-from ._atlas import get_roi_index
+from ._atlas import get_cimt_labels
 
 logger = logging.getLogger(__name__)
 
-def map_subject_to_subj(subject_name: str) -> str:
-    """Convert Sbj001 to sub-001 format."""
-    if subject_name.startswith('Sbj'):
-        num = subject_name.replace("Sbj", "").lstrip("0") or "0"
-    else:
-        numbers = re.findall(r'\d+', subject_name)
-        num = numbers[0] if numbers else "0"
-    return f"sub-{int(num):03d}"
-
-def get_subject_sfreq(subject_id: str, lcmv_root: Path, condition: str = "bima_off") -> float:
-    """Retrieve sampling frequency from CIMT pipeline metadata."""
-    metadata_file = lcmv_root / f"{subject_id}_{condition}" / "pipeline_metadata.json"
-    if not metadata_file.exists():
-        raise FileNotFoundError(f"Metadata not found: {metadata_file}")
-    
-    with open(metadata_file, 'r') as f:
-        metadata = json.load(f)
-    return float(metadata['sfreq_hz'])
-
-def get_roi_time_series(
-    subject_id: str, 
-    lcmv_root: Path, 
-    roi_name: str, 
-    condition: str = "bima_off"
-) -> Optional[np.ndarray]:
+def load_tensor(tensor_path: str | Path) -> dict:
     """
-    Extract the 1D time series for a specific CIMT ROI from the unified time courses.
+    Load a study tensor directly from disk.
+    
+    Returns:
+        dict: {
+            'data': np.ndarray (n_subj, n_roi, n_time),
+            'subject_ids': np.ndarray (n_subj,),
+            'sfreq': float
+        }
+    """
+    tensor_path = Path(tensor_path)
+    if not tensor_path.exists():
+        raise FileNotFoundError(f"Tensor not found: {tensor_path}")
+        
+    master = np.load(tensor_path, allow_pickle=True)
+    return {
+        "data": master["data"],
+        "subject_ids": master["subject_ids"],
+        "sfreq": float(master["sfreq"])
+    }
+
+def get_roi_indices(roi_names: list[str]) -> list[int]:
+    """
+    Map CIMT ROI names to their integer indices in the tensor.
     
     Args:
-        subject_id: Subject identifier (e.g., 'sub-001').
-        lcmv_root: Root path to LCMV derivatives.
-        roi_name: Name of the ROI in the CIMT atlas (e.g., 'R_4_ROI').
-        condition: Condition folder name (default: 'bima_off').
+        roi_names: List of ROI names (e.g., ['L_4_ROI', 'STN-lh']).
         
     Returns:
-        1D numpy array of shape (n_times,) or None if extraction fails.
+        List of integer indices corresponding to axis 1 of the tensor.
     """
-    subj_dir = lcmv_root / f"{subject_id}_{condition}"
-    cimt_file = subj_dir / "cimt_time_courses.npy"
-    
-    if not cimt_file.exists():
-        logger.warning(f"CIMT time courses not found for {subject_id} at {cimt_file}")
-        return None
-        
-    try:
-        # Load full 448-ROI time courses: Shape (448, n_times)
-        cimt_tc = np.load(cimt_file)
-    except Exception as e:
-        logger.error(f"Failed to load CIMT data for {subject_id}: {e}")
-        return None
-        
-    # Get ROI Index
-    try:
-        roi_idx = get_roi_index(roi_name)
-    except ValueError as e:
-        logger.error(e)
-        return None
-        
-    # Validate index bounds
-    if roi_idx >= cimt_tc.shape[0]:
-        logger.error(f"ROI index {roi_idx} out of bounds for data shape {cimt_tc.shape}")
-        return None
-        
-    # Extract 1D time series
-    return cimt_tc[roi_idx, :]
+    atlas = get_cimt_labels()
+    indices = []
+    for name in roi_names:
+        match = atlas[atlas['roi_name'] == name]
+        if match.empty:
+            logger.warning(f"ROI '{name}' not found in CIMT atlas.")
+            continue
+        indices.append(int(match.iloc[0]['index']))
+    return indices
