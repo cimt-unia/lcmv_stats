@@ -18,8 +18,6 @@ import logging
 from mne.stats import permutation_cluster_test, combine_adjacency, ttest_1samp_no_p
 from typing import List, Optional, Tuple, Literal
 
-from .utils import load_tensor
-from .epoching import epoch_tensor
 from ._atlas import resolve_roi_indices, get_cimt_labels
 
 logger = logging.getLogger(__name__)
@@ -131,27 +129,26 @@ def compute_spectrogram_for_subject(
     return f_filt, t, Sxx_out
 
 
-def compute_group_spectrograms_from_tensors(
-    tensor_path_a: str,
-    tensor_path_b: str,
+def compute_group_spectrograms_from_epochs(
+    epochs_a: np.ndarray,
+    epochs_b: np.ndarray,
     roi_name: str,
     sfreq: float,
-    epoch_duration: float = 2.0,
-    overlap: float = 0.5,
     f_min: float = 12.0,
     f_max: float = 30.0,
     normalize_mode: Literal["none", "condition_a"] = "condition_a"
 ) -> Tuple[List[np.ndarray], np.ndarray, np.ndarray, float]:
     """
-    End-to-end: Load two condition tensors → epoch → concatenate → spectrograms.
+    Compute group spectrograms directly from 5D epoched tensors.
+    
+    This replaces compute_group_spectrograms_from_tensors for workflows 
+    where epoching has already been performed.
 
     Args:
-        tensor_path_a: Path to Condition A .npz tensor.
-        tensor_path_b: Path to Condition B .npz tensor.
+        epochs_a: 5D array (n_subjects, n_epochs_a, n_rois, n_samples).
+        epochs_b: 5D array (n_subjects, n_epochs_b, n_rois, n_samples).
         roi_name: CIMT ROI name (e.g., 'L_4_ROI').
         sfreq: Sampling frequency.
-        epoch_duration: Epoch duration in seconds.
-        overlap: Epoch overlap fraction.
         f_min, f_max: Frequency range.
         normalize_mode: Baseline normalization mode.
 
@@ -160,30 +157,36 @@ def compute_group_spectrograms_from_tensors(
         spectrograms_list: List of 2D arrays (n_freqs, n_times), one per subject.
         boundary_sec: Time in seconds where Condition A ends.
     """
-    tens_a = load_tensor(tensor_path_a)
-    tens_b = load_tensor(tensor_path_b)
+    if epochs_a.shape != epochs_b.shape:
+        # Allow different number of epochs, but subjects/ROIs/samples must match
+        if epochs_a.shape[0] != epochs_b.shape[0] or \
+           epochs_a.shape[2] != epochs_b.shape[2] or \
+           epochs_a.shape[3] != epochs_b.shape[3]:
+            raise ValueError("Epoch arrays must have same n_subjects, n_rois, and n_samples.")
 
-    if not np.array_equal(tens_a['subject_ids'], tens_b['subject_ids']):
-        raise ValueError("Subject IDs mismatch between tensors.")
-
-    # Epoch both tensors (Z-scoring applied before epoching)
-    ep_a = epoch_tensor(tens_a['data'], sfreq, epoch_duration, overlap, do_zscore=True)
-    ep_b = epoch_tensor(tens_b['data'], sfreq, epoch_duration, overlap, do_zscore=True)
+    n_subjects = epochs_a.shape[0]
+    n_epochs_a = epochs_a.shape[1]
+    n_samples_per_epoch = epochs_a.shape[3]
 
     # Resolve ROI index
     roi_idx = resolve_roi_indices([roi_name])[0]
-    n_samples_per_epoch = ep_a.shape[3]
 
     spectrograms = []
     f_out, t_out = None, None
 
-    for i in range(len(tens_a['subject_ids'])):
-        concat_sig, n_epochs_a = concatenate_condition_epochs(
-            ep_a[i], ep_b[i], roi_index=roi_idx
+    logger.info(f"Computing spectrograms for {n_subjects} subjects at ROI '{roi_name}'...")
+
+    for i in range(n_subjects):
+        # Extract 3D slices for this subject: (n_epochs, n_rois, n_samples)
+        ep_a_subj = epochs_a[i]
+        ep_b_subj = epochs_b[i]
+
+        concat_sig, n_ep_a = concatenate_condition_epochs(
+            ep_a_subj, ep_b_subj, roi_index=roi_idx
         )
 
         f, t, sxx = compute_spectrogram_for_subject(
-            concat_sig, sfreq, n_samples_per_epoch, n_epochs_a,
+            concat_sig, sfreq, n_samples_per_epoch, n_ep_a,
             f_min=f_min, f_max=f_max, normalize_mode=normalize_mode
         )
 
@@ -192,9 +195,10 @@ def compute_group_spectrograms_from_tensors(
             if f_out is None:
                 f_out, t_out = f, t
 
-    # Boundary in seconds: n_epochs_a * epoch_duration
-    # (accounts for overlap: actual time covered = n_epochs_a * step_duration)
-    step_sec = epoch_duration * (1 - overlap)
+    # Boundary in seconds: n_epochs_a * step_duration
+    # Assuming 50% overlap default from epoching module: step = duration * 0.5
+    # Note: If overlap varies, this should be passed as an argument.
+    step_sec = (n_samples_per_epoch / sfreq) * 0.5 
     boundary_sec = n_epochs_a * step_sec
 
     return spectrograms, f_out, t_out, boundary_sec
@@ -306,3 +310,38 @@ def plot_and_test_group_spectrograms(
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         logger.info(f"Saved spectrogram to {save_path}")
     plt.show()
+
+
+'''
+import lcmv_stats as ls
+from pathlib import Path
+
+# 1. Load Tensors
+tens_a = ls.load_tensor(Path("./ml_data/study_eyes_closed.npz"))
+tens_b = ls.load_tensor(Path("./ml_data/study_left_hand.npz"))
+
+# 2. Epoch Data (Once for all analyses)
+ep_a = ls.epoch_tensor(tens_a['data'], tens_a['sfreq'], 2.0, 0.5, do_zscore=True)
+ep_b = ls.epoch_tensor(tens_b['data'], tens_b['sfreq'], 2.0, 0.5, do_zscore=True)
+
+# 3. Compute Spectrograms from Epochs
+specs_list, f, t, boundary = ls.compute_group_spectrograms_from_epochs(
+    epochs_a=ep_a,
+    epochs_b=ep_b,
+    roi_name='L_4_ROI',
+    sfreq=tens_a['sfreq'],
+    f_min=12, 
+    f_max=30
+)
+
+# 4. Plot and Test
+ls.plot_and_test_group_spectrograms(
+    spectrograms_list=specs_list,
+    f=f,
+    t=t,
+    roi_name='L_4_ROI',
+    hemisphere='L',
+    boundary_sec=boundary,
+    n_permutations=1000
+)
+'''
