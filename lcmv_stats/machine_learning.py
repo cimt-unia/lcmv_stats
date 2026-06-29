@@ -15,6 +15,8 @@ import numpy as np
 from scipy import signal
 from typing import Dict, Optional, Tuple, List
 import logging
+from .utils import load_tensor
+from .epoching import epoch_tensor
 
 from ._atlas import resolve_roi_indices, select_network, get_cimt_labels
 
@@ -110,7 +112,6 @@ def extract_band_power_features(
 
     return features, band_names, roi_indices_used
 
-
 def prepare_ml_dataset(
     tensor_path_a: str,
     tensor_path_b: str,
@@ -125,41 +126,24 @@ def prepare_ml_dataset(
 ) -> Dict:
     """
     End-to-end ML dataset preparation from two condition tensors.
-
-    Loads tensors → epochs (with Z-scoring) → extracts band power features →
-    returns structured dict ready for sklearn/pytorch/tensorflow.
-
-    Args:
-        tensor_path_a: Path to Condition A .npz tensor.
-        tensor_path_b: Path to Condition B .npz tensor.
-        sfreq: Sampling frequency.
-        roi_names: Explicit ROI names (optional).
-        functional_systems: Metadata-based ROI selection (optional).
-        sub_systems: Metadata-based ROI selection (optional).
-        epoch_duration: Epoch duration in seconds.
-        overlap: Epoch overlap fraction.
-        freq_bands: Band definitions. Uses defaults if None.
-        log_transform: Apply log10 transform to band powers.
-
-    Returns:
-        Dict with keys:
-            'features_a': (n_subj, n_ep_a, n_rois, n_bands)
-            'features_b': (n_subj, n_ep_b, n_rois, n_bands)
-            'labels': (n_total_samples,) — 0 for A, 1 for B
-            'subject_ids': (n_subj,)
-            'band_names': list of band name strings
-            'roi_names': list of ROI name strings
-            'sfreq': float
-            'epoch_duration': float
+    Handles subject mismatches by intersecting subject lists.
     """
-    from .utils import load_tensor
-    from .epoching import epoch_tensor
+
 
     tens_a = load_tensor(tensor_path_a)
     tens_b = load_tensor(tensor_path_b)
 
-    if not np.array_equal(tens_a['subject_ids'], tens_b['subject_ids']):
-        raise ValueError("Subject IDs mismatch between tensors.")
+    # ── FIX: Handle subject mismatch gracefully ──
+    ids_a = tens_a['subject_ids']
+    ids_b = tens_b['subject_ids']
+    
+    common_ids, idx_a, idx_b = np.intersect1d(ids_a, ids_b, return_indices=True)
+    
+    if len(common_ids) == 0:
+        raise ValueError("No common subjects found between tensors for ML dataset.")
+        
+    if len(common_ids) < len(ids_a) or len(common_ids) < len(ids_b):
+        logger.warning(f"ML Dataset: Using {len(common_ids)} common subjects due to mismatch.")
 
     # Resolve ROI indices
     if roi_names is not None:
@@ -177,9 +161,9 @@ def prepare_ml_dataset(
                          'DLPFC', 'IFJ', 'IFS', 'VLPFC', 'Subthalamic']
         )
 
-    # Epoch both conditions (Z-scoring applied before epoching)
-    ep_a = epoch_tensor(tens_a['data'], sfreq, epoch_duration, overlap, do_zscore=True)
-    ep_b = epoch_tensor(tens_b['data'], sfreq, epoch_duration, overlap, do_zscore=True)
+    # Epoch both conditions using ONLY the aligned subjects
+    ep_a = epoch_tensor(tens_a['data'][idx_a], sfreq, epoch_duration, overlap, do_zscore=True)
+    ep_b = epoch_tensor(tens_b['data'][idx_b], sfreq, epoch_duration, overlap, do_zscore=True)
 
     # Extract features
     feat_a, band_names, roi_idx_used = extract_band_power_features(
@@ -189,13 +173,11 @@ def prepare_ml_dataset(
         ep_b, sfreq, freq_bands, roi_indices=roi_idx, log_transform=log_transform
     )
 
-
-
     # Build labels: 0 = Condition A, 1 = Condition B
-    # Labels must match flattened sample count: n_subj * (n_ep_a + n_ep_b)
     n_ep_a = feat_a.shape[1]
     n_ep_b = feat_b.shape[1]
-    n_subj = feat_a.shape[0]
+    n_subj = feat_a.shape[0] # This is now the number of COMMON subjects
+    
     labels_per_subj = np.concatenate([
         np.zeros(n_ep_a, dtype=np.int8),
         np.ones(n_ep_b, dtype=np.int8)
@@ -212,13 +194,12 @@ def prepare_ml_dataset(
         'features_a': feat_a,
         'features_b': feat_b,
         'labels': labels,
-        'subject_ids': tens_a['subject_ids'],
+        'subject_ids': common_ids, # <--- RETURN COMMON IDS
         'band_names': band_names,
         'roi_names': selected_roi_names,
         'sfreq': sfreq,
         'epoch_duration': epoch_duration,
     }
-
 
 def flatten_for_sklearn(dataset: Dict) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
