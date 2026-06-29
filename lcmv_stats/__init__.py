@@ -44,7 +44,7 @@ from .connectivity import (
 from .timefreq import (
     concatenate_condition_epochs,
     compute_spectrogram_for_subject,
-    compute_group_spectrograms_from_tensors,
+    compute_group_spectrograms_from_epochs,
     plot_and_test_group_spectrograms,
 )
 
@@ -99,7 +99,7 @@ __all__ = [
     # ── Time-Frequency ──
     "concatenate_condition_epochs",
     "compute_spectrogram_for_subject",
-    "compute_group_spectrograms_from_tensors",
+    "compute_group_spectrograms_from_epochs",
     "plot_and_test_group_spectrograms",
     
     # ── Machine Learning ──
