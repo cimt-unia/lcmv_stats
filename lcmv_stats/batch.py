@@ -1,150 +1,86 @@
 # lcmv_stats/batch.py
 
 """
-Batch processing helpers for lcmv_stats.
-Handles subject iteration, data aggregation, and statistical preparation.
+Batch processing for tensor-native group comparisons.
+Chains: load → zscore+epoch → connectivity → statistics.
 """
 
 import numpy as np
-import pandas as pd
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict
 import logging
-from .utils import map_subject_to_subj, get_subject_sfreq
-from .epoching import extract_event_epochs
+from .utils import load_tensor
+from .epoching import epoch_tensor
 from .connectivity import extract_wpli_features
+from .statistics import run_edgewise_permutation, prepare_connectivity_for_stats
 
 logger = logging.getLogger(__name__)
 
-
-def prepare_connectivity_for_stats(
-    connectivity_matrices: List[np.ndarray]
-) -> np.ndarray:
-    """
-    Universal processor to convert a list of connectivity matrices into 
-    the (n_subjects, n_edges) array required for statistical testing.
-    
-    Args:
-        connectivity_matrices: A list of 2D numpy arrays (N_rois x N_rois).
-        
-    Returns:
-        A 2D numpy array of shape (n_subjects, n_edges).
-    """
-    if not connectivity_matrices:
-        raise ValueError("No connectivity matrices provided.")
-    
-    # 1. Validate that all matrices are square and have the same dimensions
-    n_rois = connectivity_matrices[0].shape[0]
-    for i, mat in enumerate(connectivity_matrices):
-        if mat.shape != (n_rois, n_rois):
-            raise ValueError(f"Subject {i} has matrix shape {mat.shape}, expected ({n_rois}, {n_rois})")
-        if mat.ndim != 2:
-            raise ValueError(f"Subject {i} input is not a 2D matrix.")
-
-    # 2. Extract Upper Triangle for all subjects at once
-    triu_idx = np.triu_indices(n_rois, k=1)
-    vectors = [mat[triu_idx] for mat in connectivity_matrices]
-    
-    # 3. Stack into final array
-    return np.stack(vectors)
-
-
-def prepare_group_comparison(
-    events_df: pd.DataFrame,
-    lcmv_root: Path,
+def compare_tensors(
+    tensor_path_a: str | Path,
+    tensor_path_b: str | Path,
     band: str = "low_beta",
-    condition_col: str = 'task_type',
-    val_a: str = 'rest',
-    val_b: str = 'task',
-    is_phase_comparison: bool = False
-) -> Dict[str, any]:
+    epoch_duration: float = 2.0,
+    overlap: float = 0.0,
+    do_zscore: bool = True
+) -> Dict:
     """
-    Generic group-level processor for comparing any two conditions.
+    End-to-end comparison of two condition tensors.
+    Z-scoring is applied to continuous data before epoching.
     
-    This function replaces both legacy batch helpers. It can handle:
-    1. Condition A vs. Condition B (e.g., Rest vs. Task)
-    2. In-Phase vs. Out-Phase (if is_phase_comparison=True)
-    
-    Args:
-        events_df: DataFrame containing trial metadata.
-        lcmv_root: Path to LCMV derivatives.
-        band: Frequency band for connectivity.
-        condition_col: Column name in CSV to filter conditions.
-        val_a: Value for Condition A (e.g., 'rest' or 'in').
-        val_b: Value for Condition B (e.g., 'task' or 'out').
-        is_phase_comparison: If True, extracts In/Out epochs from the SAME trials 
-                             rather than filtering by condition_col.
-        
     Returns:
-        Dictionary with 'data_a', 'data_b', 'valid_subs'.
+        {
+            'per_subject': {
+                'data_a': (n_subj, n_edges),
+                'data_b': (n_subj, n_edges),
+                'subject_ids': (n_subj,)
+            },
+            'group_summary': pd.DataFrame with edge-wise stats,
+            'metadata': dict
+        }
     """
-    # Ensure subject IDs are standardized
-    subject_ids = sorted([map_subject_to_subj(s) for s in events_df['subject'].unique()])
+    tens_a = load_tensor(tensor_path_a)
+    tens_b = load_tensor(tensor_path_b)
     
-    all_mats_a = []
-    all_mats_b = []
-    valid_subs = []
+    # Strict alignment check
+    if not np.array_equal(tens_a['subject_ids'], tens_b['subject_ids']):
+        raise ValueError("Subject IDs mismatch between tensors.")
     
-    logger.info(f"Processing {len(subject_ids)} subjects...")
-
-    for sid in subject_ids:
-        try:
-            # 1. Filter Events for this specific subject
-            subj_events = events_df[events_df['subject'].apply(lambda x: map_subject_to_subj(x) == sid)]
-            
-            if is_phase_comparison:
-                # For Phase comparison, we use ALL good trials for this subject
-                ev_a = subj_events
-                ev_b = subj_events
-            else:
-                # For Condition comparison, we filter by the column
-                ev_a = subj_events[subj_events[condition_col] == val_a]
-                ev_b = subj_events[subj_events[condition_col] == val_b]
-            
-            # Skip if either condition is missing for this subject
-            if ev_a.empty or ev_b.empty: 
-                logger.debug(f"Skipping {sid}: Missing events.")
-                continue
-            
-            # 2. Extract Epochs
-            # Note: extract_event_epochs always returns (in_epochs, out_epochs)
-            in_a, out_a = extract_event_epochs(sid, lcmv_root, ev_a)
-            in_b, out_b = extract_event_epochs(sid, lcmv_root, ev_b)
-            
-            if in_a.size == 0 or in_b.size == 0: 
-                continue
-            
-            # 3. Compute Connectivity
-            sfreq = get_subject_sfreq(sid, lcmv_root, condition="bima_off")
-            
-            if is_phase_comparison:
-                # Compare In vs Out within the same trials
-                conn_a, _ = extract_wpli_features(in_a, out_a, band, sfreq)
-                # For phase, we usually compare the 'in' matrix of A vs 'out' matrix of A
-                # But to keep the signature consistent (A vs B), we treat 'in' as A and 'out' as B
-                _, conn_b = extract_wpli_features(in_a, out_a, band, sfreq)
-            else:
-                # Compare Condition A vs Condition B
-                conn_a, _ = extract_wpli_features(in_a, out_a, band, sfreq)
-                conn_b, _ = extract_wpli_features(in_b, out_b, band, sfreq)
-            
-            if conn_a is None or conn_b is None: 
-                continue
-            
-            all_mats_a.append(conn_a)
-            all_mats_b.append(conn_b)
+    sfreq = tens_a['sfreq']
+    
+    # Epoch entire tensors at once (includes Z-scoring if do_zscore=True)
+    # Output: (n_subj, n_ep, n_roi, n_samp)
+    ep_a = epoch_tensor(tens_a['data'], sfreq, epoch_duration, overlap, do_zscore)
+    ep_b = epoch_tensor(tens_b['data'], sfreq, epoch_duration, overlap, do_zscore)
+    
+    mats_a, mats_b, valid_subs = [], [], []
+    
+    for i, sid in enumerate(tens_a['subject_ids']):
+        conn_a, _ = extract_wpli_features(ep_a[i], ep_a[i], band, sfreq)
+        conn_b, _ = extract_wpli_features(ep_b[i], ep_b[i], band, sfreq)
+        
+        if conn_a is not None and conn_b is not None:
+            mats_a.append(conn_a)
+            mats_b.append(conn_b)
             valid_subs.append(sid)
-            
-        except Exception as e:
-            logger.warning(f"Failed to process subject {sid}: {e}")
-            continue
-
-    if not all_mats_a:
-        raise ValueError("No valid data extracted for either condition. Check your event labels and paths.")
-
-    # 4. Use the universal processor to create final arrays
+    
+    if not mats_a:
+        raise ValueError("No valid connectivity matrices extracted.")
+    
+    subj_a = prepare_connectivity_for_stats(mats_a)
+    subj_b = prepare_connectivity_for_stats(mats_b)
+    stats_df = run_edgewise_permutation(subj_a, subj_b)
+    
     return {
-        'data_a': prepare_connectivity_for_stats(all_mats_a),
-        'data_b': prepare_connectivity_for_stats(all_mats_b),
-        'valid_subs': valid_subs
+        "per_subject": {
+            "data_a": subj_a,
+            "data_b": subj_b,
+            "subject_ids": np.array(valid_subs)
+        },
+        "group_summary": stats_df,
+        "metadata": {
+            "band": band, "sfreq": sfreq,
+            "epoch_duration": epoch_duration, "overlap": overlap,
+            "do_zscore": do_zscore
+        }
     }
