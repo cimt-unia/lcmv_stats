@@ -65,7 +65,7 @@ def compute_spectrogram_for_subject(
     f_max: float = 30.0,
     normalize_mode: Literal["none", "condition_a"] = "condition_a",
     nperseg_override: Optional[int] = None
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     """
     Compute spectrogram for a single subject's concatenated epoch signal.
 
@@ -81,7 +81,8 @@ def compute_spectrogram_for_subject(
         nperseg_override: Override automatic window size.
 
     Returns:
-        (f_filt, t, Sxx_out) where Sxx_out is Z-scored or raw.
+        (f_filt, t, Sxx_out, boundary_time) where Sxx_out is Z-scored or raw,
+        and boundary_time is the precise time (in seconds) where CondA ends.
     """
     if nperseg_override is not None:
         nperseg = nperseg_override
@@ -98,20 +99,24 @@ def compute_spectrogram_for_subject(
         )
     except Exception as e:
         logger.error(f"Spectrogram computation failed: {e}")
-        return np.array([]), np.array([]), np.array([])
+        return np.array([]), np.array([]), np.array([]), 0.0
 
     freq_mask = (f >= f_min) & (f <= f_max)
     f_filt = f[freq_mask]
     Sxx_filt = Sxx[freq_mask, :]
 
+    # --- PRECISE BOUNDARY CALCULATION ---
+    # Map the exact sample boundary to the nearest spectrogram time bin
+    boundary_sample = n_epochs_a * n_samples_per_epoch
+    samples_per_time_bin = nperseg - noverlap
+    
+    # Find the closest time bin index for the boundary
+    boundary_bin_idx = min(int(boundary_sample / samples_per_time_bin), len(t) - 1)
+    boundary_time = float(t[boundary_bin_idx])  # Use actual t value for plotting
+
     # --- Baseline Normalization ---
     if normalize_mode == "condition_a":
-        # Condition A occupies the first n_epochs_a * n_samples_per_epoch samples
-        boundary_sample = n_epochs_a * n_samples_per_epoch
-        # Map sample boundary to time index
-        samples_per_time_bin = nperseg - noverlap
-        boundary_time_idx = boundary_sample / samples_per_time_bin
-        ref_mask = t <= boundary_time_idx
+        ref_mask = np.arange(len(t)) <= boundary_bin_idx
     else:
         ref_mask = None
 
@@ -126,7 +131,7 @@ def compute_spectrogram_for_subject(
             logger.warning("No time points in Condition A baseline. Returning raw PSD.")
         Sxx_out = Sxx_filt
 
-    return f_filt, t, Sxx_out
+    return f_filt, t, Sxx_out, boundary_time
 
 
 def compute_group_spectrograms_from_epochs(
@@ -155,7 +160,7 @@ def compute_group_spectrograms_from_epochs(
     Returns:
         (spectrograms_list, f, t, boundary_sec)
         spectrograms_list: List of 2D arrays (n_freqs, n_times), one per subject.
-        boundary_sec: Time in seconds where Condition A ends.
+        boundary_sec: Precise time in seconds where Condition A ends.
     """
     if epochs_a.shape != epochs_b.shape:
         # Allow different number of epochs, but subjects/ROIs/samples must match
@@ -173,6 +178,7 @@ def compute_group_spectrograms_from_epochs(
 
     spectrograms = []
     f_out, t_out = None, None
+    boundary_sec = 0.0  # Will be set from first valid subject
 
     logger.info(f"Computing spectrograms for {n_subjects} subjects at ROI '{roi_name}'...")
 
@@ -185,7 +191,8 @@ def compute_group_spectrograms_from_epochs(
             ep_a_subj, ep_b_subj, roi_index=roi_idx
         )
 
-        f, t, sxx = compute_spectrogram_for_subject(
+        # Now returns 4 values including precise boundary_time
+        f, t, sxx, subj_boundary = compute_spectrogram_for_subject(
             concat_sig, sfreq, n_samples_per_epoch, n_ep_a,
             f_min=f_min, f_max=f_max, normalize_mode=normalize_mode
         )
@@ -194,12 +201,7 @@ def compute_group_spectrograms_from_epochs(
             spectrograms.append(sxx)
             if f_out is None:
                 f_out, t_out = f, t
-
-    # Boundary in seconds: n_epochs_a * step_duration
-    # Assuming 50% overlap default from epoching module: step = duration * 0.5
-    # Note: If overlap varies, this should be passed as an argument.
-    step_sec = (n_samples_per_epoch / sfreq) * 0.5 
-    boundary_sec = n_epochs_a * step_sec
+                boundary_sec = subj_boundary  # Use precise boundary from spectrogram
 
     return spectrograms, f_out, t_out, boundary_sec
 
@@ -310,38 +312,3 @@ def plot_and_test_group_spectrograms(
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         logger.info(f"Saved spectrogram to {save_path}")
     plt.show()
-
-
-'''
-import lcmv_stats as ls
-from pathlib import Path
-
-# 1. Load Tensors
-tens_a = ls.load_tensor(Path("./ml_data/study_eyes_closed.npz"))
-tens_b = ls.load_tensor(Path("./ml_data/study_left_hand.npz"))
-
-# 2. Epoch Data (Once for all analyses)
-ep_a = ls.epoch_tensor(tens_a['data'], tens_a['sfreq'], 2.0, 0.5, do_zscore=True)
-ep_b = ls.epoch_tensor(tens_b['data'], tens_b['sfreq'], 2.0, 0.5, do_zscore=True)
-
-# 3. Compute Spectrograms from Epochs
-specs_list, f, t, boundary = ls.compute_group_spectrograms_from_epochs(
-    epochs_a=ep_a,
-    epochs_b=ep_b,
-    roi_name='L_4_ROI',
-    sfreq=tens_a['sfreq'],
-    f_min=12, 
-    f_max=30
-)
-
-# 4. Plot and Test
-ls.plot_and_test_group_spectrograms(
-    spectrograms_list=specs_list,
-    f=f,
-    t=t,
-    roi_name='L_4_ROI',
-    hemisphere='L',
-    boundary_sec=boundary,
-    n_permutations=1000
-)
-'''
