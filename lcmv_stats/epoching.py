@@ -22,7 +22,6 @@ def epoch_tensor(
         epoch_duration: Duration of each epoch in seconds.
         overlap: Overlap fraction (0.0 to 1.0).
         do_zscore: Z-score each ROI's continuous time course before epoching.
-                   Default True for resting-state/continuous data.
         
     Returns:
         np.ndarray: Shape (n_subjects, n_epochs, n_rois, n_samples).
