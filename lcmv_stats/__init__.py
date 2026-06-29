@@ -55,9 +55,19 @@ from .machine_learning import (
     flatten_for_sklearn,
 )
 
+# ── Visualization  ──
+from .visualization import (
+    plot_connectivity_matrix,
+    plot_psd_rois,
+    plot_psd_comparison,
+    plot_spectrogram,
+    plot_feature_distribution,
+    validate_matrix_quality,
+)
 __version__ = "0.4.0"
 
 __all__ = [
+    
     # ── Atlas & ROI ──
     "get_cimt_labels",
     "resolve_roi_indices",
@@ -66,10 +76,13 @@ __all__ = [
     "get_roi_index",
     "get_motor_network_indices",
     "get_motor_network_metadata",
+    
     # ── Tensor I/O ──
     "load_tensor",
+    
     # ── Epoching ──
     "epoch_tensor",
+    
     # ── Connectivity & Statistics ──
     "get_frequency_bands",
     "compute_connectivity_matrix",
@@ -82,13 +95,23 @@ __all__ = [
     "save_comparison_results",
     "plot_top_edges",
     "create_directed_effect_map",
+    
     # ── Time-Frequency ──
     "concatenate_condition_epochs",
     "compute_spectrogram_for_subject",
     "compute_group_spectrograms_from_tensors",
     "plot_and_test_group_spectrograms",
+    
     # ── Machine Learning ──
     "extract_band_power_features",
     "prepare_ml_dataset",
     "flatten_for_sklearn",
+    
+    # ── Visualization ──
+    "plot_connectivity_matrix",
+    "plot_psd_rois",
+    "plot_psd_comparison",
+    "plot_spectrogram",
+    "plot_feature_distribution",
+    "validate_matrix_quality",
 ]
