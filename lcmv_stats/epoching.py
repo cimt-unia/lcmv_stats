@@ -63,3 +63,35 @@ def epoch_tensor(
         f"(zscore={do_zscore})"
     )
     return epochs
+
+'''
+# Usage Example
+import numpy as np
+from lcmv_stats.epoching import epoch_tensor
+from lcmv_stats.utils import load_tensor
+
+# 1. Load continuous tensor (your existing output from lcmv_xtra)
+cont = load_tensor("./ml_data/study_eyes_closed.npz")
+# cont['data'].shape → (12, 448, T)  ← Continuous
+
+# 2. Epoch it (Z-scoring applied BEFORE windowing)
+epochs = epoch_tensor(
+    tensor_data=cont['data'],
+    sfreq=cont['sfreq'],
+    epoch_duration=2.0,
+    overlap=0.5,
+    do_zscore=True
+)
+# epochs.shape → (12, n_epochs, 448, 500)  ← Epoched
+
+# 3. Save as new .npz with identical metadata structure
+np.savez_compressed(
+    "./ml_data/epochs_eyes_closed.npz",
+    data=epochs,                    # Now 5D instead of 3D
+    subject_ids=cont['subject_ids'], # Same subjects, same order
+    sfreq=cont['sfreq'],            # Same sampling rate
+    epoch_duration=2.0,             # NEW: epoch metadata
+    overlap=0.5                     # NEW: epoch metadata
+)
+print(f"✅ Saved epoched tensor: {epochs.shape}")
+'''
