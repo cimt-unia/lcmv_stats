@@ -1,6 +1,3 @@
-# lcmv_stats/__init__.py
-
-
 """
 lcmv_stats: Tensor-native statistical analysis for CIMT source-space EEG/MEG.
 
@@ -67,21 +64,24 @@ from .visualization import (
     validate_matrix_quality,
 )
 
-# ── Epoch Statistics & Feature Extraction ──
-from .epoch_stats import (
+# ── Toxic Epoch Detection & Feature Extraction ──
+from .toxic_epochs import (
     to_db,
     require_finite,
     safe_pearsonr,
+    batch_correlation,
     bandpass,
     compute_psd,
     flatten_spectra,
     flatten_spectra_fullgrid,
     theta_correlation,
+    load_tensor_batch,
     derive_psd_params,
     build_feature_dataframe,
     plot_grouped_bars,
     plot_roi_lines,
     plot_all_bands_grid,
+    plot_rejection_impact,
 )
 
 __version__ = "0.5.0"
@@ -134,18 +134,21 @@ __all__ = [
     "plot_feature_distribution",
     "validate_matrix_quality",
     
-    # ── Epoch Statistics & Feature Extraction ──
+    # ── Toxic Epoch Detection & Feature Extraction ──
     "to_db",
     "require_finite",
     "safe_pearsonr",
+    "batch_correlation",
     "bandpass",
     "compute_psd",
     "flatten_spectra",
     "flatten_spectra_fullgrid",
     "theta_correlation",
+    "load_tensor_batch",
     "derive_psd_params",
     "build_feature_dataframe",
     "plot_grouped_bars",
     "plot_roi_lines",
     "plot_all_bands_grid",
+    "plot_rejection_impact",
 ]
