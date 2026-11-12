@@ -844,10 +844,7 @@ def plot_rejection_impact(
                 is_first_metric=(m_i == 0), is_last_col=(c_i == 1)
             )
 
-    fig.suptitle(
-        "Impact of Toxic Epoch Rejection on LFP-Source Agreement",
-        fontsize=14, fontweight="bold", y=1.02
-    )
+
 
     if out_path is not None:
         fig.savefig(str(out_path), dpi=150, bbox_inches="tight")
