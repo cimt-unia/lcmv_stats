@@ -1,4 +1,4 @@
-# lcmv_states/epoch_stats.py
+# toxic_epochs.py
 
 """Epoch Statistics: Minimal EEG/FEM spectral analysis and feature extraction.
 
@@ -131,6 +131,29 @@ def safe_pearsonr(x: np.ndarray, y: np.ndarray) -> float:
 
     r, _ = pearsonr(xc, yc)
     return float(r)
+
+def batch_correlation(a: np.ndarray, b: np.ndarray, axis: int = 0) -> np.ndarray:
+    """Compute safe Pearson r along a specific axis for 2D arrays.
+
+    Args:
+        a: First 2D array.
+        b: Second 2D array (must match `a` shape).
+        axis: Axis to reduce over (0 = per-column, 1 = per-row).
+
+    Returns:
+        1D array of correlation coefficients.
+    """
+    if a.shape != b.shape or a.ndim != 2:
+        raise ValueError("Inputs must be matching 2D arrays.")
+
+    a_moved = np.moveaxis(a, axis, -1)
+    b_moved = np.moveaxis(b, axis, -1)
+
+    flat_a = a_moved.reshape(-1, a_moved.shape[-1])
+    flat_b = b_moved.reshape(-1, b_moved.shape[-1])
+
+    corrs = np.array([safe_pearsonr(x, y) for x, y in zip(flat_a, flat_b)])
+    return corrs.reshape(a_moved.shape[:-1])
 
 # ---------------------------------------------------------------------------
 # Core Spectral Processing
@@ -296,6 +319,40 @@ def load_tensor(path: Path | str, roi: str) -> tuple[np.ndarray, float]:
 
     logger.info("Loaded %s ROI=%s shape=%s sfreq=%.1f", tensor_path.name, roi, epochs.shape, sfreq)
     return epochs, sfreq
+
+def load_tensor_batch(path: Path | str) -> tuple[np.ndarray, float, list[str]]:
+    """Load all ROIs from a tensor .npz file into a 3D array.
+
+    Returns:
+        data: 3D array of shape (n_rois, n_epochs, n_times).
+        sfreq: Sampling frequency.
+        roi_names: List of ROI strings corresponding to the first axis.
+    """
+    tensor_path = Path(path)
+    if not tensor_path.exists():
+        raise FileNotFoundError(f"Tensor file not found: {tensor_path}")
+
+    with np.load(tensor_path, allow_pickle=False) as npz:
+        required = {"data", "sfreq", "roi_names"}
+        if missing := required - set(npz.files):
+            raise ValueError(f"{tensor_path.name} missing keys: {sorted(missing)}")
+
+        data = np.asarray(npz["data"], dtype=float)
+        sfreq = float(npz["sfreq"])
+        roi_names = [str(r) for r in npz["roi_names"]]
+
+    if data.ndim == 4:
+        data = data[0]
+    if data.ndim != 3:
+        raise ValueError(f"{tensor_path.name}: expected 3D data, got {data.shape}")
+
+    require_finite(data, f"{tensor_path.name} batch data")
+
+    logger.info(
+        "Loaded batch %s shape=%s sfreq=%.1f rois=%s",
+        tensor_path.name, data.shape, sfreq, roi_names
+    )
+    return data, sfreq, roi_names
 
 # ---------------------------------------------------------------------------
 # Feature Extraction
@@ -707,3 +764,94 @@ def plot_all_bands_grid(
                 )
         plt.show()
         plt.close(fig)
+
+def _add_bar_label(
+    ax: plt.Axes, x_pos: float, height: float,
+    color: str = "#555555", bold: bool = False
+) -> None:
+    """Helper to add a text label above/below a bar."""
+    if not np.isfinite(height):
+        return
+    va = "bottom" if height >= 0 else "top"
+    offset = 0.02 if height >= 0 else -0.04
+    weight = "bold" if bold else "normal"
+    ax.text(
+        x_pos, height + offset, f"{height:.2f}",
+        ha="center", va=va, fontsize=8, color=color, fontweight=weight
+    )
+
+def _plot_rejection_subplot(
+    ax: plt.Axes, stats_df: pd.DataFrame, cond: str,
+    before_col: str, after_col: str, title: str,
+    is_first_metric: bool, is_last_col: bool
+) -> None:
+    """Helper to draw a single Before/After rejection subplot."""
+    sub = stats_df[stats_df["Condition"] == cond]
+    rois = sub["ROI"].tolist()
+    x = np.arange(len(rois))
+    width = 0.35
+
+    before_vals = sub[before_col].to_numpy()
+    after_vals = sub[after_col].to_numpy()
+
+    ax.bar(
+        x - width / 2, before_vals, width, label="Before Rejection",
+        color="#A0A0A0", edgecolor="white", linewidth=0.8, zorder=3
+    )
+    ax.bar(
+        x + width / 2, after_vals, width, label="After Rejection",
+        color="#2CA02C", edgecolor="white", linewidth=0.8, zorder=3
+    )
+
+    for i, (b_val, a_val) in enumerate(zip(before_vals, after_vals)):
+        _add_bar_label(ax, x[i] - width / 2, b_val, color="#555555")
+        _add_bar_label(ax, x[i] + width / 2, a_val, color="#1E701E", bold=True)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(rois, fontsize=10)
+    ax.set_title(
+        f"{cond} — {title}",
+        color=COND_COLORS.get(cond, "#333333"), pad=10, fontweight="bold"
+    )
+    ax.set_ylabel("Pearson r")
+    ax.set_ylim(-0.2, 1.1)
+    ax.axhline(0, color="#333333", linewidth=0.8, alpha=0.5, zorder=0)
+    _style_axis(ax)
+
+    if is_first_metric and is_last_col:
+        ax.legend(loc="upper right", fontsize=9, frameon=True)
+
+def plot_rejection_impact(
+    stats_df: pd.DataFrame,
+    out_path: Path | str | None = None,
+) -> None:
+    """Plot grouped bar charts comparing Before vs After toxic epoch rejection."""
+    metrics = [
+        ("R_spec_before", "R_spec_after", "Spectral Curve Correlation (R_spec)"),
+        ("R_epoch_before", "R_epoch_after", "Per-Epoch Correlation (R_epoch)"),
+    ]
+    conditions = ["Gain", "Loss"]
+    _update_plot_style()
+
+    fig, axes = plt.subplots(
+        len(metrics), len(conditions), figsize=(12, 8), constrained_layout=True
+    )
+
+    for m_i, (before_col, after_col, title) in enumerate(metrics):
+        for c_i, cond in enumerate(conditions):
+            _plot_rejection_subplot(
+                axes[m_i, c_i], stats_df, cond, before_col, after_col, title,
+                is_first_metric=(m_i == 0), is_last_col=(c_i == 1)
+            )
+
+    fig.suptitle(
+        "Impact of Toxic Epoch Rejection on LFP-Source Agreement",
+        fontsize=14, fontweight="bold", y=1.02
+    )
+
+    if out_path is not None:
+        fig.savefig(str(out_path), dpi=150, bbox_inches="tight")
+        logger.info("saved rejection impact plot to %s", out_path)
+
+    plt.show()
+    plt.close(fig)
