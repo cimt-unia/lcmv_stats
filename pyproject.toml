@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lcmv_stats"
-version = "0.1.0"
+version = "0.5.0"
 description = "Statistical analysis tools for LCMV source-reconstructed EEG/MEG data, optimized for the CIMT Unified Atlas."
 readme = "README.md"
 license = {text = "MIT"}
