@@ -1,4 +1,4 @@
-lcmv_states/epoch_stats.py
+# lcmv_states/epoch_stats.py
 
 """Epoch Statistics: Minimal EEG/FEM spectral analysis and feature extraction.
 
